@@ -1,0 +1,54 @@
+name: Daily Illuminati Market Scan
+
+on:
+  schedule:
+    # 08:00 AM IST = 02:30 UTC
+    # Runs Monday (1) through Friday (5)
+    - cron: '30 2 * * 1-5'
+  
+  # Allows you to run this manually from the Actions tab for testing
+  workflow_dispatch:
+
+jobs:
+  analyze-market:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed if you ever want to save data back to the repo
+
+    steps:
+      # 1. Check out your code onto the server
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Set up Python 3.10 environment
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip' # Caches dependencies to make future runs faster
+
+      # 3. Install all necessary libraries
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt || pip install nselib yfinance pandas numpy requests feedparser tabulate reportlab nltk transformers schedule google-generativeai aiohttp xlsxwriter trafilatura rapidfuzz beautifulsoup4 ta jinja2 textblob nest_asyncio pytz
+
+      # 4. Run the Illuminati Terminal
+      # We pass the secrets (API Keys) into the environment here
+      - name: Run Analysis
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          TWELVEDATA_KEY: ${{ secrets.TWELVEDATA_KEY }}
+        run: |
+          python illuminati.py
+
+      # 5. Save the Reports (HTML/Excel) as Artifacts
+      # This saves the 'output' folder so you can download it from GitHub directly
+      - name: Upload Market Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: Daily-Market-Reports
+          path: output/
+          retention-days: 5
