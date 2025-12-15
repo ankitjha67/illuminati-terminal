@@ -1,16 +1,75 @@
 # -*- coding: utf-8 -*-
 """
-Illuminati Terminal v21.0 - The "Leviathan" Build
+Illuminati Terminal v19.2 - The "CI/CD Resilient" Build
 FIXES:
-- "NIFTY 50 Only" Limit Removed.
-- Now scans the full NIFTY 500 (Large + Mid + Small Cap) even if nselib fails.
-- Guaranteed 500+ Asset Analysis every run.
+1. Imports: Type hints (Optional, List) are imported immediately to prevent NameError.
+2. Installer: Fixed 'pip install' syntax error by separating the upgrade flag.
+3. Scope: NLTK and other libs are imported globally AFTER installation to prevent definition errors.
 """
 
-import os
 import sys
 import subprocess
+import importlib.util
 import time
+import os
+from typing import List, Dict, Optional, Tuple, Any
+
+# --- 1. ROBUST SELF-HEALING INSTALLER ---
+def check_and_install_dependencies():
+    # Core packages required for the script
+    required_packages = [
+        'nselib', 'yfinance', 'pandas', 'numpy', 'requests', 'feedparser', 
+        'tabulate', 'reportlab', 'nltk', 'transformers', 'schedule', 
+        'google-generativeai', 'aiohttp', 'xlsxwriter', 'trafilatura', 
+        'rapidfuzz', 'beautifulsoup4', 'ta', 'jinja2', 'textblob', 'nest_asyncio', 'pytz'
+    ]
+    
+    missing = []
+    print("🛠️ System Health Check...")
+    
+    # 1. Identify missing packages
+    for package in required_packages:
+        if importlib.util.find_spec(package) is None:
+            missing.append(package)
+
+    # 2. Install missing packages
+    if missing:
+        print(f"📦 Installing missing modules: {', '.join(missing)}...")
+        try:
+            # Install base packages
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "--user"] + missing)
+            print("✅ Base dependencies installed.")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Install Error: {e}")
+            sys.exit(1)
+
+    # 3. Force Upgrade Critical AI Library (Safe Method)
+    # Checks if google-generativeai is installed, then upgrades it safely in a separate call
+    if importlib.util.find_spec("google.generativeai") is not None:
+        print("🧠 Optimizing AI libraries...")
+        try:
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install", "--user", "--upgrade", "google-generativeai"
+            ])
+            # Vital: Invalidate caches so the new imports work immediately
+            importlib.invalidate_caches()
+            print("✅ System Ready.")
+        except Exception as e:
+            print(f"⚠️ AI Update Warning (Non-critical): {e}")
+
+# Run installer immediately
+check_and_install_dependencies()
+
+# --- 2. GLOBAL IMPORTS (NOW SAFE) ---
+# All heavy imports happen AFTER the installer has guaranteed their existence
+import numpy as np
+import pandas as pd
+import pytz
+import yfinance as yf
+import aiohttp
+import feedparser
+import requests
+import nest_asyncio
 import re
 import json
 import ssl
@@ -24,6 +83,16 @@ import logging
 import hashlib
 import smtplib
 import datetime as dt
+
+import nltk
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+
+from requests.adapters import HTTPAdapter, Retry
+from tabulate import tabulate
+from textblob import TextBlob
+from bs4 import BeautifulSoup
+from jinja2 import Template
+from dateutil import parser as dateparser
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.parse import urlparse, quote_plus
@@ -33,48 +102,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-# --- 1. SELF-HEALING INSTALLER ---
-def install_dependencies():
-    required = [
-        'nselib', 'yfinance', 'pandas', 'numpy', 'requests', 'feedparser', 
-        'tabulate', 'reportlab', 'nltk', 'transformers', 'schedule', 
-        'google-generativeai', 'aiohttp', 'xlsxwriter', 'trafilatura', 
-        'rapidfuzz', 'beautifulsoup4', 'ta', 'jinja2', 'textblob', 'nest_asyncio', 'pytz'
-    ]
-    installed = {pkg.split('==')[0] for pkg in sys.modules}
-    missing = [pkg for pkg in required if pkg not in installed]
-    
-    if 'google-generativeai' in installed:
-        missing.append('google-generativeai --upgrade')
-
-    if missing:
-        print(f"🛠️ Verifying System Dependencies...")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing, 
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print("✅ Dependencies verified.")
-        except Exception as e:
-            print(f"❌ Install warning: {e}")
-
-try: import nselib
-except ImportError: install_dependencies()
-
-# --- 2. IMPORTS ---
-import numpy as np
-import pandas as pd
-import pytz
-import yfinance as yf
-import aiohttp
-import feedparser
-import requests
-import nest_asyncio
-from requests.adapters import HTTPAdapter, Retry
-from tabulate import tabulate
-from textblob import TextBlob
-from bs4 import BeautifulSoup
-from jinja2 import Template
-from dateutil import parser as dateparser
-
+# Conditional Imports
 try: from nselib import capital_market; HAS_NSELIB = True
 except ImportError: HAS_NSELIB = False
 
@@ -104,14 +132,18 @@ CACHE_DIR.mkdir(exist_ok=True)
 if hasattr(ssl, '_create_unverified_context'):
     ssl._create_default_https_context = ssl._create_unverified_context
 
-# --- THE LEVIATHAN LIST (NIFTY 500 BACKUP) ---
-# This ensures we scan the entire relevant market even if the NSE scraper fails.
-NIFTY_500_BACKUP = [
-    '3MINDIA', 'ABB', 'ACC', 'AIAENG', 'APLAPOLLO', 'AUBANK', 'AARTIDRUGS', 'AAVAS', 'ABBOTINDIA', 'ADANIENSOL', 'ADANIENT', 'ADANIGREEN', 'ADANIPORTS', 'ADANIPOWER', 'ATGL', 'ABCAPITAL', 'ABFRL', 'AEGISLOG', 'AETHER', 'AFFLE', 'AJANTPHARM', 'APLLTD', 'ALKEM', 'ALKYLAMINE', 'ALLCARGO', 'ALOKINDS', 'AMARAJABAT', 'AMBER', 'AMBUJACEM', 'ANGELONE', 'ANURAS', 'APOLLOHOSP', 'APOLLOTYRE', 'APTUS', 'ASAHIINDIA', 'ASHOKLEY', 'ASIANPAINT', 'ASTERDM', 'ASTRAZEN', 'ASTRAL', 'ATUL', 'AUROPHARMA', 'AVANTIFEED', 'DMART', 'AXISBANK', 'BASF', 'BSE', 'BAJAJ-AUTO', 'BAJAJCON', 'BAJAJELEC', 'BAJFINANCE', 'BAJAJFINSV', 'BAJAJHLDNG', 'BALAMINES', 'BALKRISIND', 'BALRAMCHIN', 'BANDHANBNK', 'BANKBARODA', 'BANKINDIA', 'MAHABANK', 'BATAINDIA', 'BAYERCROP', 'BERGEPAINT', 'BDL', 'BEL', 'BHARATFORG', 'BHEL', 'BPCL', 'BHARTIARTL', 'BIOCON', 'BIRLACORPN', 'BSOFT', 'BLUEDART', 'BLUESTARCO', 'BBTC', 'BORORENEW', 'BOSCHLTD', 'BRIGADE', 'BCG', 'BRITANNIA', 'MAPMYINDIA', 'CCL', 'CESC', 'CGPOWER', 'CRISIL', 'CSBBANK', 'CAMPUS', 'CANFINHOME', 'CANBK', 'CAPLIPOINT', 'CGCL', 'CARBORUNIV', 'CASTROLIND', 'CEATLTD', 'CENTRALBK', 'CDSL', 'CENTURYPLY', 'CENTURYTEX', 'CHALET', 'CHAMBLFERT', 'CHEMPLASTS', 'CHOLAHLDNG', 'CHOLAFIN', 'CIPLA', 'CUB', 'CLEAN', 'COALINDIA', 'COCHINSHIP', 'COFORGE', 'COLPAL', 'CAMS', 'CONCOR', 'COROMANDEL', 'CRAFTSMAN', 'CREDITACC', 'CROMPTON', 'CUMMINSIND', 'CYIENT', 'DCMSHRIRAM', 'DLF', 'DABUR', 'DALBHARAT', 'DEEPAKNTR', 'DELHIVERY', 'DELTACORP', 'DEVYANI', 'DIVISLAB', 'DIXON', 'LALPATHLAB', 'DRREDDY', 'EIDPARRY', 'EIHOTEL', 'EPL', 'EASEMYTRIP', 'EDELWEISS', 'EICHERMOT', 'ELGIEQUIP', 'EMAMILTD', 'ENDURANCE', 'ENGINERSIN', 'EQUITASBNK', 'ERIS', 'ESCORTS', 'EXIDEIND', 'FDC', 'NYKAA', 'FEDERALBNK', 'FACT', 'FINEORG', 'FINCABLES', 'FINPIPE', 'FSL', 'FORTIS', 'GRINFRA', 'GAIL', 'GMMPFAUDLR', 'GMRINFRA', 'GALAXYSURF', 'GRSE', 'GARFIBRES', 'GICRE', 'GLAND', 'GLAXO', 'GLENMARK', 'MEDANTA', 'GOCOLORS', 'GODFRYPHLP', 'GODREJAGRO', 'GODREJCP', 'GODREJIND', 'GODREJPROP', 'GRANULES', 'GRAPHITE', 'GRASIM', 'GESHIP', 'GRINDWELL', 'GUJALKALI', 'GAEL', 'FLUOROCHEM', 'GUJGASLTD', 'GNFC', 'GPPL', 'GSFC', 'GSPL', 'HEG', 'HCLTECH', 'HDFCAMC', 'HDFCBANK', 'HDFCLIFE', 'HFCL', 'HLEGLAS', 'HAPPSTMNDS', 'HATHWAY', 'HAVELLS', 'HEROMOTOCO', 'HINDALCO', 'HAL', 'HINDCOPPER', 'HINDPETRO', 'HINDUNILVR', 'HINDZINC', 'POWERINDIA', 'HOMEFIRST', 'HONAUT', 'HUDCO', 'ICICIBANK', 'ICICIGI', 'ICICIPRULI', 'ISEC', 'IDBI', 'IDFCFIRSTB', 'IDFC', 'IFBINDUST', 'IIFL', 'IRB', 'ITC', 'ITI', 'INDIACEM', 'INDIAMART', 'INDIANB', 'IEX', 'INDHOTEL', 'IOC', 'IOB', 'IRCTC', 'IRFC', 'INDIGOPNTS', 'IGL', 'INDUSTOWER', 'INDUSINDBK', 'INFIBEAM', 'NAUKRI', 'INFY', 'INGERRAND', 'INTELLECT', 'INDIGO', 'IPCALAB', 'JBCHEPHARM', 'JKCEMENT', 'JKLAKSHMI', 'JKPAPER', 'JMFINANCIL', 'JSWENERGY', 'JSWSTEEL', 'JAMNAAUTO', 'JINDALSAW', 'JSL', 'JINDALSTEL', 'JUBLFOOD', 'JUBLINGREA', 'JUBLPHARMA', 'JUSTDIAL', 'JYOTHYLAB', 'KPRMILL', 'KEI', 'KNRCON', 'KPITTECH', 'KRBL', 'KSB', 'KAJARIACER', 'KALPATPOWR', 'KALYANKJIL', 'KANSAINER', 'KARURVYSYA', 'KEC', 'KOTAKBANK', 'KIMS', 'L&TFH', 'LTTS', 'LICHSGFIN', 'LTIM', 'LAXMIMACH', 'LICI', 'LAURUSLABS', 'LXCHEM', 'LEMONTREE', 'LINDEINDIA', 'LUPIN', 'LUXIND', 'MMTC', 'MOIL', 'MRF', 'MTARTECH', 'LODHA', 'MGL', 'M&MFIN', 'M&M', 'MAHINDCIE', 'MAHLOG', 'MANAPPURAM', 'MRPL', 'MARICO', 'MARUTI', 'MASTEK', 'MFSL', 'MAXHEALTH', 'MAZDOCK', 'MEDPLUS', 'METROBRAND', 'METROPOLIS', 'MINDACORP', 'MSUMI', 'MOTILALOFS', 'MPHASIS', 'MCX', 'MUTHOOTFIN', 'NATCOPHARM', 'NBCC', 'NCC', 'NESCO', 'NHPC', 'NLCINDIA', 'NMDC', 'NSL', 'NTPC', 'NH', 'NATIONALUM', 'NAVINFLUOR', 'NAZARA', 'NESTLEIND', 'NETWORK18', 'NAM-INDIA', 'OBEROIRLTY', 'ONGC', 'OIL', 'PAYTM', 'OFSS', 'ORIENTELEC', 'POLICYBZR', 'PCBL', 'PIIND', 'PNBHOUSING', 'PNCINFRA', 'PVRINOX', 'PAGEIND', 'PATANJALI', 'PERSISTENT', 'PETRONET', 'PFIZER', 'PHOENIXLTD', 'PIDILITIND', 'PEL', 'POLYMED', 'POLYCAB', 'POLYPLEX', 'POONAWALLA', 'PFC', 'POWERGRID', 'PRAJIND', 'PRESTIGE', 'PRINCEPIPE', 'PRSMJOHNSN', 'PGHH', 'PNB', 'PUNJABCHEM', 'RBLBANK', 'RECLTD', 'RHIM', 'RITES', 'RADICO', 'RVNL', 'RAILTEL', 'RAJESHEXPO', 'RAMCOCEM', 'RCF', 'RATNAMANI', 'RTNINDIA', 'RAYMOND', 'REDINGTON', 'RELAXO', 'RELIANCE', 'RESTAURANT', 'ROSSARI', 'ROUTE', 'SBICARD', 'SBILIFE', 'SIS', 'SJVN', 'SKFINDIA', 'SRF', 'SANOFI', 'SAPPHIRE', 'SAREGAMA', 'SCHAEFFLER', 'SCHANDER', 'SHARDACROP', 'SFL', 'SHILPAMED', 'SCI', 'SHREECEM', 'RENUKA', 'SHRIRAMFIN', 'SHYAMMETL', 'SIEMENS', 'SOBHA', 'SOLARINDS', 'SONACOMS', 'SONATSOFTW', 'STARHEALTH', 'SBIN', 'SAIL', 'SWSOLAR', 'STLTECH', 'STAR', 'SUDARSCHEM', 'SUMICHEM', 'SUNPHARMA', 'SUNTV', 'SUNDARMFIN', 'SUNDRMFAST', 'SUNTECK', 'SUPRAJIT', 'SUPREMEIND', 'SUVENPHAR', 'SUZLON', 'SYMPHONY', 'SYNGENE', 'TATACHEM', 'TATACOMM', 'TCS', 'TATACONSUM', 'TATAELXSI', 'TATAINVEST', 'TATAMTRDVR', 'TATAMOTORS', 'TATAPOWER', 'TATASTEEL', 'TTML', 'TEAMLEASE', 'TECHM', 'TEJASNET', 'NIACL', 'RAMCOROS', 'THERMAX', 'TIMKEN', 'TITAN', 'TORNTPHARM', 'TORNTPOWER', 'TRENT', 'TRIDENT', 'TRIVENI', 'TRITURBINE', 'TIINDIA', 'UCOBANK', 'UFLEX', 'UNOMINDA', 'UPL', 'UTIAMC', 'ULTRACEMCO', 'UNIONBANK', 'UBL', 'MCDOWELL-N', 'VGUARD', 'VMART', 'VIPIND', 'VAIBHAVGBL', 'VAKRANGEE', 'VALIANTORG', 'VTL', 'VARROC', 'VBL', 'VEDL', 'VENKEYS', 'VIJAYA', 'VINATIORGA', 'IDEA', 'VOLTAS', 'WHIRLPOOL', 'WIPRO', 'WESTLIFE', 'ZFCVINDIA', 'ZEEL', 'ZENSARTECH', 'ZOMATO', 'ZYDUSLIFE', 'ZYDUSWELL'
-]
-
 STOPLIST = set([
-    "THE", "AND", "ARE", "IS", "FOR", "OVER", "WITH", "TO", "OF", "IN", "BY", "FROM", "ON", "AT", "OR", "AS", "AN", "IT", "GO", "NO", "MARKET", "COMPANY", "COMPANIES", "NEWS", "STOCK", "STOCKS", "SEBI", "INDIAN", "INDIA", "EXPECTED", "LOSSES", "GAINS", "SHARES", "NSE", "BSE", "DECLINE", "DECLINED", "ALSO", "FIRMS", "MONTHS", "SEGMENTS", "LTD", "PRIMARY", "BOTH", "COMING", "FUNDRAISING", "SIGNIFICANT", "LIMITED", "POSSIBLE", "HEALTH", "HEALTHCARE", "WAVE", "FIFTEEN", "EYE", "BANK", "IPO", "IPOS", "SET", "RS", "BE", "WAS", "PUSH", "PARTICULARLY", "MUTUAL", "FUNDS", "PRIVATE", "PUBLIC", "LOWER", "HIGHER", "TODAY", "WEEK", "YEAR", "REPORT", "GLOBAL", "WORLD", "BUSINESS", "FINANCE", "MONEY", "TIMES", "ECONOMIC", "CITY", "SALES", "PROFIT", "LOSS", "QUARTER", "RESULTS", "DATA", "GROUP", "IND", "OUT"
+    "THE", "AND", "ARE", "IS", "FOR", "OVER", "WITH", "TO", "OF", "IN",
+    "BY", "FROM", "ON", "AT", "OR", "AS", "AN", "IT", "GO", "NO",
+    "MARKET", "COMPANY", "COMPANIES", "NEWS", "STOCK", "STOCKS", "SEBI",
+    "INDIAN", "INDIA", "EXPECTED", "LOSSES", "GAINS", "SHARES", "NSE", "BSE",
+    "DECLINE", "DECLINED", "ALSO", "FIRMS", "MONTHS", "SEGMENTS", "LTD",
+    "PRIMARY", "BOTH", "COMING", "FUNDRAISING", "SIGNIFICANT", "LIMITED",
+    "POSSIBLE", "HEALTH", "HEALTHCARE", "WAVE", "FIFTEEN", "EYE", "BANK",
+    "IPO", "IPOS", "SET", "RS", "BE", "WAS", "PUSH", "PARTICULARLY", "MUTUAL", "FUNDS",
+    "PRIVATE", "PUBLIC", "LOWER", "HIGHER", "TODAY", "WEEK", "YEAR", "REPORT",
+    "GLOBAL", "WORLD", "BUSINESS", "FINANCE", "MONEY", "TIMES", "ECONOMIC", "CITY",
+    "SALES", "PROFIT", "LOSS", "QUARTER", "RESULTS", "DATA", "GROUP", "IND", "OUT"
 ])
 
 SECTOR_MAP = {
@@ -155,11 +187,7 @@ class MasterMapper:
         self.build_universe()
         
     def build_universe(self):
-        log.info("⏳ Indexing NSE Market (nselib + Fallback)...")
-        # 1. LOAD MASSIVE BACKUP LIST FIRST (Safety Net)
-        for t in NIFTY_500_BACKUP:
-            self.universe[t] = t
-            
+        log.info("⏳ Indexing NSE Market (nselib)...")
         try:
             if HAS_NSELIB:
                 df = capital_market.equity_list()
@@ -173,10 +201,12 @@ class MasterMapper:
                     first = simple.split()[0]
                     if len(first) > 3 and first not in STOPLIST:
                         self.keywords[first] = symbol
-                log.info(f"✅ Indexed {len(self.universe)} companies (Live + Backup).")
+                log.info(f"✅ Indexed {len(self.universe)} companies.")
             else: raise Exception("nselib not found")
         except Exception as e:
-            log.warning(f"⚠️ NSE Indexing failed. Using NIFTY 500 Backup ({len(self.universe)} stocks).")
+            log.warning(f"⚠️ NSE Indexing failed. Using Fallback.")
+            defaults = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK', 'SBIN', 'TATAMOTORS', 'ITC', 'BAJFINANCE', 'LT', 'MARUTI']
+            for d in defaults: self.universe[d] = d
 
     def extract_tickers(self, articles):
         found = []
@@ -238,12 +268,14 @@ class DiskCache:
         self.base_dir = base_dir; self.ttl = ttl_seconds
         (base_dir / "pages").mkdir(exist_ok=True)
     def _key(self, url: str) -> str: return hashlib.sha1(url.encode("utf-8")).hexdigest()
+    
     def get(self, url: str) -> Optional[str]:
         path = self.base_dir / "pages" / f"{self._key(url)}.txt"
         if path.exists() and (time.time() - path.stat().st_mtime) < self.ttl:
             try: return path.read_text(encoding="utf-8")
             except: pass
         return None
+    
     def set(self, url: str, content: str):
         try: (self.base_dir / "pages" / f"{self._key(url)}.txt").write_text(content, encoding="utf-8")
         except: pass
@@ -530,7 +562,7 @@ class Emailer:
 class ReportLab:
     def __init__(self, out_dir): self.out_dir = out_dir
     def generate_html_dashboard(self, results, articles, trends, ind_summary):
-        template = """<!DOCTYPE html><html><head><title>Illuminati v21.0</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v21.0</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
+        template = """<!DOCTYPE html><html><head><title>Illuminati v19.2</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v19.2</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
         try:
             t = Template(template)
             html = t.render(results=results, articles=articles, trends=trends, ind_summary=ind_summary, date=dt.datetime.now(), total=len(results))
@@ -561,18 +593,21 @@ class GeminiBrain:
     def generate_narrative(self, df_summary):
         if not self.active: return "LLM Analysis Disabled."
         
-        # KEY AI FIX: Dynamic Discovery + Fallback
         try:
-            available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        except: available = []
-        
-        priority = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']
-        chosen = next((m for m in priority if m in available), 'models/gemini-pro')
-        
-        try:
-            log.info(f"🤖 Generating Insight with {chosen}...")
+            # 1. Ask Google for available models
+            models = list(genai.list_models())
+            valid_models = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
+            
+            priority = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']
+            chosen = next((m for m in priority if m in valid_models), valid_models[0] if valid_models else None)
+            
+            if not chosen: return "AI Error: No text-generation models found."
+
+            log.info(f"🤖 Generating Insight with: {chosen}")
             self.model = genai.GenerativeModel(chosen)
-            return self.model.generate_content(f"Analyze this Indian Stock Market data:\n{df_summary.to_csv()}").text
+            csv_data = df_summary.to_csv()
+            return self.model.generate_content(f"Analyze this Indian Stock Market data:\n{csv_data}").text
+
         except Exception as e:
             return f"LLM Error: {e}"
 
@@ -603,7 +638,7 @@ def calculate_sleep_seconds():
 def run_illuminati(interactive=False, tickers_arg=None):
     current_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print("\n" + "="*80)
-    print(f"👁️ ILLUMINATI TERMINAL v21.0 (LEVIATHAN) | {current_time}")
+    print(f"👁️ ILLUMINATI TERMINAL v19.2 (CI/CD RESILIENT) | {current_time}")
     print("="*80)
 
     api = APIKeys()
@@ -628,35 +663,27 @@ def run_illuminati(interactive=False, tickers_arg=None):
         print("\n🔮 PREDICTED BOOMING INDUSTRIES (News Hype):")
         print(tabulate(pd.DataFrame(trends).head(5), headers='keys', tablefmt='psql', showindex=False))
     
-    # HYBRID SCANNING: News Tickers + NIFTY 500 BACKUP
-    news_tickers = mapper.extract_tickers(articles)
-    # If news finds few tickers, we default to the full backup list (500 stocks)
-    # This guarantees a massive scan every single time.
-    combined_tickers = list(set(news_tickers + NIFTY_500_BACKUP))
+    tickers = mapper.extract_tickers(articles)
+    if tickers_arg: tickers.extend(tickers_arg.split(','))
+    tickers = list(set(tickers))
     
-    if tickers_arg: combined_tickers.extend(tickers_arg.split(','))
-    
-    print(f"\n⚡ Analyzing {len(combined_tickers)} Assets (Full Market Scan)...")
+    if not tickers:
+        log.warning("No tickers found. Using Default Watchlist.")
+        tickers = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK', 'TATAMOTORS', 'BAJFINANCE']
+
+    print(f"\n⚡ Analyzing {len(tickers)} Assets...")
     results = []
     
-    # Batch Processing for Speed
-    with ThreadPoolExecutor(max_workers=20) as executor:
-        def process_ticker(t):
-            try:
-                prices, info, stock, src = data.fetch_data(t)
-                if prices is None: return None
-                res = lab.analyze_asset(t, prices, info, stock, src)
-                if res: return res
-            except: return None
-            
-        futures = [executor.submit(process_ticker, t) for t in combined_tickers]
-        for f in futures:
-            res = f.result()
-            if res: 
+    for t in tickers:
+        try:
+            prices, info, stock, src = data.fetch_data(t)
+            if prices is None: continue
+            res = lab.analyze_asset(t, prices, info, stock, src)
+            if res:
                 results.append(res)
-                # Only print Strong Buys to keep console clean
-                if "STRONG BUY" in res['Verdict']:
-                    print(f"   -> {res['Ticker'].ljust(12)} | Target: {str(res['Target_Price']).ljust(10)} | {res['Verdict']}")
+                target_str = f"{res['Target_Price']:.2f}" if isinstance(res['Target_Price'], (int, float)) else "N/A"
+                print(f"   -> {t.ljust(12)} | Target: {target_str.ljust(10)} | {res['Horizon'].ljust(18)} | {res['Verdict']}")
+        except Exception as e: log.error(f"Error {t}: {e}")
 
     if results:
         df = pd.DataFrame(results).sort_values("Score", ascending=False)
