@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Illuminati Terminal v19.0 - The "Bulletproof" Build
+Illuminati Terminal v19.1 - The "Installer Fix" Build
 FIXES:
-- Dependency Check: Now checks EVERY required package (nltk, yfinance, etc.) on every run.
-- Imports: All imports moved AFTER the installer to prevent NameErrors.
-- Type Hints: Restored 'Optional', 'List', 'Dict' definitions.
+- Syntax Error: Fixed the 'pip install' command that caused "Invalid requirement".
+- Optimization: Separated AI library upgrade to ensure it never breaks the main install.
 """
 
 import sys
@@ -13,9 +12,9 @@ import importlib.util
 import time
 import os
 
-# --- 1. ROBUST INSTALLER (RUNS FIRST) ---
+# --- 1. ROBUST SELF-HEALING INSTALLER ---
 def check_and_install_dependencies():
-    # List of all required non-standard libraries
+    # Core packages required for the script
     required_packages = [
         'nselib', 'yfinance', 'pandas', 'numpy', 'requests', 'feedparser', 
         'tabulate', 'reportlab', 'nltk', 'transformers', 'schedule', 
@@ -26,34 +25,38 @@ def check_and_install_dependencies():
     missing = []
     print("🛠️ System Health Check...")
     
+    # 1. Identify missing packages
     for package in required_packages:
-        # Check if installed using importlib (more reliable than sys.modules)
         if importlib.util.find_spec(package) is None:
             missing.append(package)
 
-    # Force upgrade google-generativeai if it is installed but might be old
-    if importlib.util.find_spec("google.generativeai") is not None:
-        missing.append("google-generativeai --upgrade")
-
+    # 2. Install missing packages
     if missing:
-        print(f"📦 Installing missing/outdated modules: {', '.join(missing)}...")
+        print(f"📦 Installing missing modules: {', '.join(missing)}...")
         try:
-            # Use --user to avoid permission errors, --no-warn-script-location to keep logs clean
+            # Install without --upgrade first to ensure stability
             subprocess.check_call([sys.executable, "-m", "pip", "install", "--user"] + missing)
-            print("✅ Dependencies successfully installed.")
-            
-            # Vital: Invalidate caches so the new imports work immediately
-            importlib.invalidate_caches()
+            print("✅ Base dependencies installed.")
         except subprocess.CalledProcessError as e:
-            print(f"❌ Critical Install Error: {e}")
+            print(f"❌ Install Error: {e}")
             sys.exit(1)
-    else:
-        print("✅ All systems go.")
 
-# Run the check immediately
+    # 3. Force Upgrade Critical AI Library (Safe Method)
+    # This fixes the 'model not found' errors by ensuring the latest lib version
+    print("🧠 Optimizing AI libraries...")
+    try:
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", "--user", "--upgrade", "google-generativeai"
+        ])
+        importlib.invalidate_caches()
+        print("✅ System Ready.")
+    except Exception as e:
+        print(f"⚠️ AI Update Warning (Non-critical): {e}")
+
+# Run installer immediately
 check_and_install_dependencies()
 
-# --- 2. GLOBAL IMPORTS (NOW SAFE) ---
+# --- 2. GLOBAL IMPORTS (SAFE) ---
 from typing import List, Dict, Optional, Tuple, Any
 import numpy as np
 import pandas as pd
@@ -77,7 +80,6 @@ import hashlib
 import smtplib
 import datetime as dt
 
-# Explicit NLTK Import
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
@@ -96,7 +98,6 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-# Conditional Imports (Features that degrade gracefully if missing)
 try: from nselib import capital_market; HAS_NSELIB = True
 except ImportError: HAS_NSELIB = False
 
@@ -308,21 +309,14 @@ class NewsEngine:
         self.session_sync = requests.Session()
         self.session_sync.headers.update({"User-Agent": "Mozilla/5.0"})
         self._setup_nlp()
-    
     def _setup_nlp(self):
-        # Force download nltk data if missing, safely
-        try:
-            nltk.data.find('sentiment/vader_lexicon.zip')
-        except LookupError:
-            print("📥 Downloading NLTK VADER Lexicon...")
-            nltk.download('vader_lexicon', quiet=True)
-            
+        try: nltk.data.find('sentiment/vader_lexicon.zip')
+        except LookupError: nltk.download('vader_lexicon', quiet=True)
         self.vader = SentimentIntensityAnalyzer()
         self.finbert = None
         if HAS_HF:
             try: self.finbert = hf_pipeline("sentiment-analysis", model="ProsusAI/finbert", tokenizer="ProsusAI/finbert", truncation=True)
             except: pass
-
     def add_google_news_feed(self, query):
         q = quote_plus(query)
         self.feeds.append(f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en")
@@ -561,7 +555,7 @@ class Emailer:
 class ReportLab:
     def __init__(self, out_dir): self.out_dir = out_dir
     def generate_html_dashboard(self, results, articles, trends, ind_summary):
-        template = """<!DOCTYPE html><html><head><title>Illuminati v19.0</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v19.0</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
+        template = """<!DOCTYPE html><html><head><title>Illuminati v19.1</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v19.1</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
         try:
             t = Template(template)
             html = t.render(results=results, articles=articles, trends=trends, ind_summary=ind_summary, date=dt.datetime.now(), total=len(results))
@@ -592,18 +586,21 @@ class GeminiBrain:
     def generate_narrative(self, df_summary):
         if not self.active: return "LLM Analysis Disabled."
         
-        # KEY AI FIX: Dynamic Discovery + Fallback
         try:
-            available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        except: available = []
-        
-        priority = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']
-        chosen = next((m for m in priority if m in available), 'models/gemini-pro')
-        
-        try:
-            log.info(f"🤖 Generating Insight with {chosen}...")
+            # 1. Ask Google for available models
+            models = list(genai.list_models())
+            valid_models = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
+            
+            priority = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']
+            chosen = next((m for m in priority if m in valid_models), valid_models[0] if valid_models else None)
+            
+            if not chosen: return "AI Error: No text-generation models found."
+
+            log.info(f"🤖 Generating Insight with: {chosen}")
             self.model = genai.GenerativeModel(chosen)
-            return self.model.generate_content(f"Analyze this Indian Stock Market data:\n{df_summary.to_csv()}").text
+            csv_data = df_summary.to_csv()
+            return self.model.generate_content(f"Analyze this Indian Stock Market data:\n{csv_data}").text
+
         except Exception as e:
             return f"LLM Error: {e}"
 
@@ -634,7 +631,7 @@ def calculate_sleep_seconds():
 def run_illuminati(interactive=False, tickers_arg=None):
     current_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print("\n" + "="*80)
-    print(f"👁️ ILLUMINATI TERMINAL v19.0 (BULLETPROOF) | {current_time}")
+    print(f"👁️ ILLUMINATI TERMINAL v19.1 (INSTALLER FIX) | {current_time}")
     print("="*80)
 
     api = APIKeys()
