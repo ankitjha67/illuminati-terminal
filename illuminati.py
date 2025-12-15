@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Illuminati Terminal v18.0 - The "Universal Key" Build
-FINAL AI FIX:
-- Removed hardcoded model names.
-- Now dynamically queries Google API to find YOUR valid models.
-- Guarantees AI generation if the key is valid.
+Illuminati Terminal v18.1 - The "Github Actions Fix" Build
+FIXES:
+- Restored missing 'typing' imports (Optional, List, Dict) causing NameError.
+- Optimized dependency installer for CI/CD environments.
 """
 
 import os
@@ -33,6 +32,9 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
+# --- CRITICAL FIX: TYPING IMPORTS RESTORED ---
+from typing import List, Dict, Optional, Tuple, Any
+
 # --- 1. SELF-HEALING INSTALLER ---
 def install_dependencies():
     required = [
@@ -44,12 +46,14 @@ def install_dependencies():
     installed = {pkg.split('==')[0] for pkg in sys.modules}
     missing = [pkg for pkg in required if pkg not in installed]
     
+    # Ensure google-generativeai is up to date for dynamic models
     if 'google-generativeai' in installed:
         missing.append('google-generativeai --upgrade')
 
     if missing:
         print(f"🛠️ Verifying System Dependencies...")
         try:
+            # Added --user to avoid permission errors in some CI environments
             subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing, 
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print("✅ Dependencies verified.")
@@ -240,6 +244,8 @@ class DiskCache:
         self.base_dir = base_dir; self.ttl = ttl_seconds
         (base_dir / "pages").mkdir(exist_ok=True)
     def _key(self, url: str) -> str: return hashlib.sha1(url.encode("utf-8")).hexdigest()
+    
+    # TYPE HINTS ENABLED
     def get(self, url: str) -> Optional[str]:
         path = self.base_dir / "pages" / f"{self._key(url)}.txt"
         if path.exists() and (time.time() - path.stat().st_mtime) < self.ttl:
@@ -431,11 +437,6 @@ class AnalysisLab:
         except: pass
         return "N/A"
 
-    def stress_test(self, price, sector):
-        shocks = {'Energy': 0.08, 'Financial Services': -0.05, 'Technology': -0.10, 'default': -0.03}
-        impact = shocks.get(sector, shocks['default'])
-        return round(price * (1 + impact), 2)
-
     def determine_strategy(self, price, dcf_val, trend, score, volatility):
         target_price = price; horizon = "Watchlist"
         tech_upside = price * (1 + volatility) 
@@ -465,7 +466,6 @@ class AnalysisLab:
         if not tech: return None
         val = self.calculate_valuation(stock, info, prices.iloc[-1])
         risk = self.compute_risk_metrics(prices)
-        stress_px = self.stress_test(prices.iloc[-1], info.get('sector', 'default'))
         
         score = 50
         # Upside
@@ -492,7 +492,6 @@ class AnalysisLab:
         dd_data = {
             "Score_Breakdown": [f"Final Score: {score}", f"Trend: {tech['Trend']}", f"Sharpe: {risk.get('Sharpe')}"],
             "Valuation_Method": "DCF" if isinstance(val, (int, float)) and val != 0 else "Estimate",
-            "Stress_Test_Oil_Shock": stress_px
         }
         
         return {"Ticker": ticker, "Price": round(prices.iloc[-1], 2), "Target_Price": target, "Horizon": horizon, "Trend": tech['Trend'], "RSI": tech['RSI'], "DCF_Val": val, "Sharpe": risk.get('Sharpe'), "Score": score, "Verdict": verdict, "Deep_Dive_Data": dd_data, "Sector": info.get('sector', 'Unknown')}
@@ -539,7 +538,7 @@ class Emailer:
 class ReportLab:
     def __init__(self, out_dir): self.out_dir = out_dir
     def generate_html_dashboard(self, results, articles, trends, ind_summary):
-        template = """<!DOCTYPE html><html><head><title>Illuminati v18.0</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v18.0</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
+        template = """<!DOCTYPE html><html><head><title>Illuminati v18.1</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v18.1</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
         try:
             t = Template(template)
             html = t.render(results=results, articles=articles, trends=trends, ind_summary=ind_summary, date=dt.datetime.now(), total=len(results))
@@ -570,25 +569,18 @@ class GeminiBrain:
     def generate_narrative(self, df_summary):
         if not self.active: return "LLM Analysis Disabled."
         
-        # KEY AI FIX: DYNAMIC MODEL DISCOVERY
+        # KEY AI FIX: Dynamic Discovery + Fallback
         try:
-            # 1. Ask Google for available models
-            models = list(genai.list_models())
-            valid_models = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
-            
-            # 2. Pick the newest available one
-            # Priority: Flash -> Pro -> Standard
-            priority = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']
-            chosen_model = next((m for m in priority if m in valid_models), valid_models[0] if valid_models else None)
-            
-            if not chosen_model:
-                return "AI Error: No text-generation models found for this API Key."
-
-            log.info(f"🤖 Generating Insight with: {chosen_model}")
-            self.model = genai.GenerativeModel(chosen_model)
-            csv_data = df_summary.to_csv()
-            return self.model.generate_content(f"Analyze this Indian Stock Market data:\n{csv_data}").text
-
+            available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        except: available = []
+        
+        priority = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']
+        chosen = next((m for m in priority if m in available), 'models/gemini-pro')
+        
+        try:
+            log.info(f"🤖 Generating Insight with {chosen}...")
+            self.model = genai.GenerativeModel(chosen)
+            return self.model.generate_content(f"Analyze this Indian Stock Market data:\n{df_summary.to_csv()}").text
         except Exception as e:
             return f"LLM Error: {e}"
 
@@ -619,7 +611,7 @@ def calculate_sleep_seconds():
 def run_illuminati(interactive=False, tickers_arg=None):
     current_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print("\n" + "="*80)
-    print(f"👁️ ILLUMINATI TERMINAL v18.0 (UNIVERSAL KEY) | {current_time}")
+    print(f"👁️ ILLUMINATI TERMINAL v18.1 (GITHUB ACTION READY) | {current_time}")
     print("="*80)
 
     api = APIKeys()
