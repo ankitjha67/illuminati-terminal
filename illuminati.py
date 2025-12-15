@@ -1,15 +1,68 @@
 # -*- coding: utf-8 -*-
 """
-Illuminati Terminal v18.1 - The "Github Actions Fix" Build
+Illuminati Terminal v19.0 - The "Bulletproof" Build
 FIXES:
-- Restored missing 'typing' imports (Optional, List, Dict) causing NameError.
-- Optimized dependency installer for CI/CD environments.
+- Dependency Check: Now checks EVERY required package (nltk, yfinance, etc.) on every run.
+- Imports: All imports moved AFTER the installer to prevent NameErrors.
+- Type Hints: Restored 'Optional', 'List', 'Dict' definitions.
 """
 
-import os
 import sys
 import subprocess
+import importlib.util
 import time
+import os
+
+# --- 1. ROBUST INSTALLER (RUNS FIRST) ---
+def check_and_install_dependencies():
+    # List of all required non-standard libraries
+    required_packages = [
+        'nselib', 'yfinance', 'pandas', 'numpy', 'requests', 'feedparser', 
+        'tabulate', 'reportlab', 'nltk', 'transformers', 'schedule', 
+        'google-generativeai', 'aiohttp', 'xlsxwriter', 'trafilatura', 
+        'rapidfuzz', 'beautifulsoup4', 'ta', 'jinja2', 'textblob', 'nest_asyncio', 'pytz'
+    ]
+    
+    missing = []
+    print("🛠️ System Health Check...")
+    
+    for package in required_packages:
+        # Check if installed using importlib (more reliable than sys.modules)
+        if importlib.util.find_spec(package) is None:
+            missing.append(package)
+
+    # Force upgrade google-generativeai if it is installed but might be old
+    if importlib.util.find_spec("google.generativeai") is not None:
+        missing.append("google-generativeai --upgrade")
+
+    if missing:
+        print(f"📦 Installing missing/outdated modules: {', '.join(missing)}...")
+        try:
+            # Use --user to avoid permission errors, --no-warn-script-location to keep logs clean
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "--user"] + missing)
+            print("✅ Dependencies successfully installed.")
+            
+            # Vital: Invalidate caches so the new imports work immediately
+            importlib.invalidate_caches()
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Critical Install Error: {e}")
+            sys.exit(1)
+    else:
+        print("✅ All systems go.")
+
+# Run the check immediately
+check_and_install_dependencies()
+
+# --- 2. GLOBAL IMPORTS (NOW SAFE) ---
+from typing import List, Dict, Optional, Tuple, Any
+import numpy as np
+import pandas as pd
+import pytz
+import yfinance as yf
+import aiohttp
+import feedparser
+import requests
+import nest_asyncio
 import re
 import json
 import ssl
@@ -23,6 +76,17 @@ import logging
 import hashlib
 import smtplib
 import datetime as dt
+
+# Explicit NLTK Import
+import nltk
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+
+from requests.adapters import HTTPAdapter, Retry
+from tabulate import tabulate
+from textblob import TextBlob
+from bs4 import BeautifulSoup
+from jinja2 import Template
+from dateutil import parser as dateparser
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from urllib.parse import urlparse, quote_plus
@@ -32,53 +96,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-# --- CRITICAL FIX: TYPING IMPORTS RESTORED ---
-from typing import List, Dict, Optional, Tuple, Any
-
-# --- 1. SELF-HEALING INSTALLER ---
-def install_dependencies():
-    required = [
-        'nselib', 'yfinance', 'pandas', 'numpy', 'requests', 'feedparser', 
-        'tabulate', 'reportlab', 'nltk', 'transformers', 'schedule', 
-        'google-generativeai', 'aiohttp', 'xlsxwriter', 'trafilatura', 
-        'rapidfuzz', 'beautifulsoup4', 'ta', 'jinja2', 'textblob', 'nest_asyncio', 'pytz'
-    ]
-    installed = {pkg.split('==')[0] for pkg in sys.modules}
-    missing = [pkg for pkg in required if pkg not in installed]
-    
-    # Ensure google-generativeai is up to date for dynamic models
-    if 'google-generativeai' in installed:
-        missing.append('google-generativeai --upgrade')
-
-    if missing:
-        print(f"🛠️ Verifying System Dependencies...")
-        try:
-            # Added --user to avoid permission errors in some CI environments
-            subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing, 
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print("✅ Dependencies verified.")
-        except Exception as e:
-            print(f"❌ Install warning: {e}")
-
-try: import nselib
-except ImportError: install_dependencies()
-
-# --- 2. IMPORTS ---
-import numpy as np
-import pandas as pd
-import pytz
-import yfinance as yf
-import aiohttp
-import feedparser
-import requests
-import nest_asyncio
-from requests.adapters import HTTPAdapter, Retry
-from tabulate import tabulate
-from textblob import TextBlob
-from bs4 import BeautifulSoup
-from jinja2 import Template
-from dateutil import parser as dateparser
-
+# Conditional Imports (Features that degrade gracefully if missing)
 try: from nselib import capital_market; HAS_NSELIB = True
 except ImportError: HAS_NSELIB = False
 
@@ -244,8 +262,6 @@ class DiskCache:
         self.base_dir = base_dir; self.ttl = ttl_seconds
         (base_dir / "pages").mkdir(exist_ok=True)
     def _key(self, url: str) -> str: return hashlib.sha1(url.encode("utf-8")).hexdigest()
-    
-    # TYPE HINTS ENABLED
     def get(self, url: str) -> Optional[str]:
         path = self.base_dir / "pages" / f"{self._key(url)}.txt"
         if path.exists() and (time.time() - path.stat().st_mtime) < self.ttl:
@@ -292,14 +308,21 @@ class NewsEngine:
         self.session_sync = requests.Session()
         self.session_sync.headers.update({"User-Agent": "Mozilla/5.0"})
         self._setup_nlp()
+    
     def _setup_nlp(self):
-        try: nltk.data.find('sentiment/vader_lexicon.zip')
-        except LookupError: nltk.download('vader_lexicon', quiet=True)
+        # Force download nltk data if missing, safely
+        try:
+            nltk.data.find('sentiment/vader_lexicon.zip')
+        except LookupError:
+            print("📥 Downloading NLTK VADER Lexicon...")
+            nltk.download('vader_lexicon', quiet=True)
+            
         self.vader = SentimentIntensityAnalyzer()
         self.finbert = None
         if HAS_HF:
             try: self.finbert = hf_pipeline("sentiment-analysis", model="ProsusAI/finbert", tokenizer="ProsusAI/finbert", truncation=True)
             except: pass
+
     def add_google_news_feed(self, query):
         q = quote_plus(query)
         self.feeds.append(f"https://news.google.com/rss/search?q={q}&hl=en-IN&gl=IN&ceid=IN:en")
@@ -538,7 +561,7 @@ class Emailer:
 class ReportLab:
     def __init__(self, out_dir): self.out_dir = out_dir
     def generate_html_dashboard(self, results, articles, trends, ind_summary):
-        template = """<!DOCTYPE html><html><head><title>Illuminati v18.1</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v18.1</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
+        template = """<!DOCTYPE html><html><head><title>Illuminati v19.0</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v19.0</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
         try:
             t = Template(template)
             html = t.render(results=results, articles=articles, trends=trends, ind_summary=ind_summary, date=dt.datetime.now(), total=len(results))
@@ -611,7 +634,7 @@ def calculate_sleep_seconds():
 def run_illuminati(interactive=False, tickers_arg=None):
     current_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print("\n" + "="*80)
-    print(f"👁️ ILLUMINATI TERMINAL v18.1 (GITHUB ACTION READY) | {current_time}")
+    print(f"👁️ ILLUMINATI TERMINAL v19.0 (BULLETPROOF) | {current_time}")
     print("="*80)
 
     api = APIKeys()
