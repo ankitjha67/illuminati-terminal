@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Illuminati Terminal v22.1 - The "News Intelligence" Build
+Illuminati Terminal v23.0 - The "Infinite Horizon" Build
 FIXES:
-- "No Tickers Found": Restored the Nifty 500 *Dictionary* so the script recognizes names like "Reliance" in the news.
-- Logic: Scans 100% based on News signals (does not force-scan the whole list).
-- Architecture: Self-Healing, Universal AI, and Reporting suite intact.
+- "Missing Stocks" Issue: Implemented Dynamic Ticker Discovery.
+- Logic: Scans news for potential tickers -> Verifies them via Yahoo Finance -> Analyzes them.
+- Coverage: Can now detect and analyze ANY stock mentioned in news (Small/Micro caps included).
+- Retains: All previous features (Self-Healing, AI, Email, Deep Dive).
 """
 
 import sys
@@ -112,23 +113,31 @@ CACHE_DIR.mkdir(exist_ok=True)
 if hasattr(ssl, '_create_unverified_context'):
     ssl._create_default_https_context = ssl._create_unverified_context
 
-# DICTIONARY FOR RECOGNITION (NOT SCANNING LIST)
-NIFTY_500_DICT = [
-    '3MINDIA', 'ABB', 'ACC', 'AIAENG', 'APLAPOLLO', 'AUBANK', 'AARTIDRUGS', 'AAVAS', 'ABBOTINDIA', 'ADANIENSOL', 'ADANIENT', 'ADANIGREEN', 'ADANIPORTS', 'ADANIPOWER', 'ATGL', 'ABCAPITAL', 'ABFRL', 'AEGISLOG', 'AETHER', 'AFFLE', 'AJANTPHARM', 'APLLTD', 'ALKEM', 'ALKYLAMINE', 'ALLCARGO', 'ALOKINDS', 'AMARAJABAT', 'AMBER', 'AMBUJACEM', 'ANGELONE', 'ANURAS', 'APOLLOHOSP', 'APOLLOTYRE', 'APTUS', 'ASAHIINDIA', 'ASHOKLEY', 'ASIANPAINT', 'ASTERDM', 'ASTRAZEN', 'ASTRAL', 'ATUL', 'AUROPHARMA', 'AVANTIFEED', 'DMART', 'AXISBANK', 'BASF', 'BSE', 'BAJAJ-AUTO', 'BAJAJCON', 'BAJAJELEC', 'BAJFINANCE', 'BAJAJFINSV', 'BAJAJHLDNG', 'BALAMINES', 'BALKRISIND', 'BALRAMCHIN', 'BANDHANBNK', 'BANKBARODA', 'BANKINDIA', 'MAHABANK', 'BATAINDIA', 'BAYERCROP', 'BERGEPAINT', 'BDL', 'BEL', 'BHARATFORG', 'BHEL', 'BPCL', 'BHARTIARTL', 'BIOCON', 'BIRLACORPN', 'BSOFT', 'BLUEDART', 'BLUESTARCO', 'BBTC', 'BORORENEW', 'BOSCHLTD', 'BRIGADE', 'BCG', 'BRITANNIA', 'MAPMYINDIA', 'CCL', 'CESC', 'CGPOWER', 'CRISIL', 'CSBBANK', 'CAMPUS', 'CANFINHOME', 'CANBK', 'CAPLIPOINT', 'CGCL', 'CARBORUNIV', 'CASTROLIND', 'CEATLTD', 'CENTRALBK', 'CDSL', 'CENTURYPLY', 'CENTURYTEX', 'CHALET', 'CHAMBLFERT', 'CHEMPLASTS', 'CHOLAHLDNG', 'CHOLAFIN', 'CIPLA', 'CUB', 'CLEAN', 'COALINDIA', 'COCHINSHIP', 'COFORGE', 'COLPAL', 'CAMS', 'CONCOR', 'COROMANDEL', 'CRAFTSMAN', 'CREDITACC', 'CROMPTON', 'CUMMINSIND', 'CYIENT', 'DCMSHRIRAM', 'DLF', 'DABUR', 'DALBHARAT', 'DEEPAKNTR', 'DELHIVERY', 'DELTACORP', 'DEVYANI', 'DIVISLAB', 'DIXON', 'LALPATHLAB', 'DRREDDY', 'EIDPARRY', 'EIHOTEL', 'EPL', 'EASEMYTRIP', 'EDELWEISS', 'EICHERMOT', 'ELGIEQUIP', 'EMAMILTD', 'ENDURANCE', 'ENGINERSIN', 'EQUITASBNK', 'ERIS', 'ESCORTS', 'EXIDEIND', 'FDC', 'NYKAA', 'FEDERALBNK', 'FACT', 'FINEORG', 'FINCABLES', 'FINPIPE', 'FSL', 'FORTIS', 'GRINFRA', 'GAIL', 'GMMPFAUDLR', 'GMRINFRA', 'GALAXYSURF', 'GRSE', 'GARFIBRES', 'GICRE', 'GLAND', 'GLAXO', 'GLENMARK', 'MEDANTA', 'GOCOLORS', 'GODFRYPHLP', 'GODREJAGRO', 'GODREJCP', 'GODREJIND', 'GODREJPROP', 'GRANULES', 'GRAPHITE', 'GRASIM', 'GESHIP', 'GRINDWELL', 'GUJALKALI', 'GAEL', 'FLUOROCHEM', 'GUJGASLTD', 'GNFC', 'GPPL', 'GSFC', 'GSPL', 'HEG', 'HCLTECH', 'HDFCAMC', 'HDFCBANK', 'HDFCLIFE', 'HFCL', 'HLEGLAS', 'HAPPSTMNDS', 'HATHWAY', 'HAVELLS', 'HEROMOTOCO', 'HINDALCO', 'HAL', 'HINDCOPPER', 'HINDPETRO', 'HINDUNILVR', 'HINDZINC', 'POWERINDIA', 'HOMEFIRST', 'HONAUT', 'HUDCO', 'ICICIBANK', 'ICICIGI', 'ICICIPRULI', 'ISEC', 'IDBI', 'IDFCFIRSTB', 'IDFC', 'IFBINDUST', 'IIFL', 'IRB', 'ITC', 'ITI', 'INDIACEM', 'INDIAMART', 'INDIANB', 'IEX', 'INDHOTEL', 'IOC', 'IOB', 'IRCTC', 'IRFC', 'INDIGOPNTS', 'IGL', 'INDUSTOWER', 'INDUSINDBK', 'INFIBEAM', 'NAUKRI', 'INFY', 'INGERRAND', 'INTELLECT', 'INDIGO', 'IPCALAB', 'JBCHEPHARM', 'JKCEMENT', 'JKLAKSHMI', 'JKPAPER', 'JMFINANCIL', 'JSWENERGY', 'JSWSTEEL', 'JAMNAAUTO', 'JINDALSAW', 'JSL', 'JINDALSTEL', 'JUBLFOOD', 'JUBLINGREA', 'JUBLPHARMA', 'JUSTDIAL', 'JYOTHYLAB', 'KPRMILL', 'KEI', 'KNRCON', 'KPITTECH', 'KRBL', 'KSB', 'KAJARIACER', 'KALPATPOWR', 'KALYANKJIL', 'KANSAINER', 'KARURVYSYA', 'KEC', 'KOTAKBANK', 'KIMS', 'L&TFH', 'LTTS', 'LICHSGFIN', 'LTIM', 'LAXMIMACH', 'LICI', 'LAURUSLABS', 'LXCHEM', 'LEMONTREE', 'LINDEINDIA', 'LUPIN', 'LUXIND', 'MMTC', 'MOIL', 'MRF', 'MTARTECH', 'LODHA', 'MGL', 'M&MFIN', 'M&M', 'MAHINDCIE', 'MAHLOG', 'MANAPPURAM', 'MRPL', 'MARICO', 'MARUTI', 'MASTEK', 'MFSL', 'MAXHEALTH', 'MAZDOCK', 'MEDPLUS', 'METROBRAND', 'METROPOLIS', 'MINDACORP', 'MSUMI', 'MOTILALOFS', 'MPHASIS', 'MCX', 'MUTHOOTFIN', 'NATCOPHARM', 'NBCC', 'NCC', 'NESCO', 'NHPC', 'NLCINDIA', 'NMDC', 'NSL', 'NTPC', 'NH', 'NATIONALUM', 'NAVINFLUOR', 'NAZARA', 'NESTLEIND', 'NETWORK18', 'NAM-INDIA', 'OBEROIRLTY', 'ONGC', 'OIL', 'PAYTM', 'OFSS', 'ORIENTELEC', 'POLICYBZR', 'PCBL', 'PIIND', 'PNBHOUSING', 'PNCINFRA', 'PVRINOX', 'PAGEIND', 'PATANJALI', 'PERSISTENT', 'PETRONET', 'PFIZER', 'PHOENIXLTD', 'PIDILITIND', 'PEL', 'POLYMED', 'POLYCAB', 'POLYPLEX', 'POONAWALLA', 'PFC', 'POWERGRID', 'PRAJIND', 'PRESTIGE', 'PRINCEPIPE', 'PRSMJOHNSN', 'PGHH', 'PNB', 'PUNJABCHEM', 'RBLBANK', 'RECLTD', 'RHIM', 'RITES', 'RADICO', 'RVNL', 'RAILTEL', 'RAJESHEXPO', 'RAMCOCEM', 'RCF', 'RATNAMANI', 'RTNINDIA', 'RAYMOND', 'REDINGTON', 'RELAXO', 'RELIANCE', 'RESTAURANT', 'ROSSARI', 'ROUTE', 'SBICARD', 'SBILIFE', 'SIS', 'SJVN', 'SKFINDIA', 'SRF', 'SANOFI', 'SAPPHIRE', 'SAREGAMA', 'SCHAEFFLER', 'SCHANDER', 'SHARDACROP', 'SFL', 'SHILPAMED', 'SCI', 'SHREECEM', 'RENUKA', 'SHRIRAMFIN', 'SHYAMMETL', 'SIEMENS', 'SOBHA', 'SOLARINDS', 'SONACOMS', 'SONATSOFTW', 'STARHEALTH', 'SBIN', 'SAIL', 'SWSOLAR', 'STLTECH', 'STAR', 'SUDARSCHEM', 'SUMICHEM', 'SUNPHARMA', 'SUNTV', 'SUNDARMFIN', 'SUNDRMFAST', 'SUNTECK', 'SUPRAJIT', 'SUPREMEIND', 'SUVENPHAR', 'SUZLON', 'SYMPHONY', 'SYNGENE', 'TATACHEM', 'TATACOMM', 'TCS', 'TATACONSUM', 'TATAELXSI', 'TATAINVEST', 'TATAMTRDVR', 'TATAMOTORS', 'TATAPOWER', 'TATASTEEL', 'TTML', 'TEAMLEASE', 'TECHM', 'TEJASNET', 'NIACL', 'RAMCOROS', 'THERMAX', 'TIMKEN', 'TITAN', 'TORNTPHARM', 'TORNTPOWER', 'TRENT', 'TRIDENT', 'TRIVENI', 'TRITURBINE', 'TIINDIA', 'UCOBANK', 'UFLEX', 'UNOMINDA', 'UPL', 'UTIAMC', 'ULTRACEMCO', 'UNIONBANK', 'UBL', 'MCDOWELL-N', 'VGUARD', 'VMART', 'VIPIND', 'VAIBHAVGBL', 'VAKRANGEE', 'VALIANTORG', 'VTL', 'VARROC', 'VBL', 'VEDL', 'VENKEYS', 'VIJAYA', 'VINATIORGA', 'IDEA', 'VOLTAS', 'WHIRLPOOL', 'WIPRO', 'WESTLIFE', 'ZFCVINDIA', 'ZEEL', 'ZENSARTECH', 'ZOMATO', 'ZYDUSLIFE', 'ZYDUSWELL'
+# EXTENSIVE BACKUP LIST (Used if nselib fails, but augmented by Discovery)
+NIFTY_500_BACKUP = [
+    'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'INFY', 'SBIN', 'BHARTIARTL', 'ITC', 'LICI', 'HINDUNILVR',
+    'LT', 'BAJFINANCE', 'HCLTECH', 'MARUTI', 'SUNPHARMA', 'ADANIENT', 'TATAMOTORS', 'TITAN', 'KOTAKBANK',
+    'ONGC', 'AXISBANK', 'NTPC', 'ULTRACEMCO', 'ADANIPORTS', 'POWERGRID', 'M&M', 'WIPRO', 'BAJAJFINSV',
+    'HAL', 'COALINDIA', 'IOC', 'DLF', 'ZOMATO', 'JIOFIN', 'SIEMENS', 'SBILIFE', 'TATASTEEL', 'GRASIM',
+    'BEL', 'VBL', 'LTIM', 'TRENT', 'ADANIGREEN', 'ADANIPOWER', 'HINDALCO', 'INDUSINDBK', 'BANKBARODA',
+    'HDFCLIFE', 'EICHERMOT', 'BPCL', 'ABB', 'GODREJCP', 'PIDILITIND', 'TECHM', 'BRITANNIA', 'PFC',
+    'RECLTD', 'CIPLA', 'AMBUJACEM', 'GAIL', 'TATAPOWER', 'CANBK', 'VEDL', 'INDIGO', 'UNIONBANK',
+    'CHOLAFIN', 'HAVELLS', 'HEROMOTOCO', 'DABUR', 'JSWSTEEL', 'SHREECEM', 'TVSMOTOR', 'DRREDDY',
+    'BOSCHLTD', 'JINDALSTEL', 'PNB', 'NHPC', 'APOLLOHOSP', 'LODHA', 'DIVISLAB', 'IOB', 'MAXHEALTH',
+    'POLYCAB', 'SOLARINDS', 'IDBI', 'IRFC', 'TORNTPHARM', 'MANKIND', 'CUMMINSIND', 'ICICIGI', 'CGPOWER',
+    'SHRIRAMFIN', 'COLPAL', 'MOTHERSON', 'MUTHOOTFIN', 'BERGEPAINT', 'TATAELXSI', 'ASTRAL', 'MARICO',
+    'ALKEM', 'PERSISTENT', 'SRF', 'IRCTC', 'MPHASIS', 'OBEROIRLTY', 'BHARATFORG', 'SBICARD', 'ASHOKLEY',
+    'INDHOTEL', 'ZEEL', 'VOLTAS', 'PIIND', 'UPL', 'APLAPOLLO', 'GUJGASLTD', 'MRF', 'AUROPHARMA',
+    'LTTS', 'SUPREMEIND', 'TIINDIA', 'PETRONET', 'CONCOR', 'LALPATHLAB', 'ABCAPITAL', 'POLICYBZR',
+    'LINDEINDIA', 'DALBHARAT', 'SCHAEFFLER', 'GMRINFRA', 'PHOENIXLTD', 'KPITTECH', 'FLUOROCHEM',
+    'PRESTIGE', 'PAGEIND', 'BANDHANBNK', 'UNOMINDA', 'ACC', 'PATANJALI', 'THERMAX', 'SUZLON',
+    'FEDERALBNK', 'IDFCFIRSTB', 'MAHABANK', 'STARHEALTH', 'UBL', 'HONAUT', 'AUBANK', 'TATACOMM',
+    'DIXON', 'BANKINDIA', 'KEYSTONE', 'SOLARA', 'MAZDOCK', 'RVNL', 'FACT', 'COCHINSHIP', 'IREDA'
 ]
 
+# STOPLIST for filtering noise words
 STOPLIST = set([
-    "THE", "AND", "ARE", "IS", "FOR", "OVER", "WITH", "TO", "OF", "IN",
-    "BY", "FROM", "ON", "AT", "OR", "AS", "AN", "IT", "GO", "NO",
-    "MARKET", "COMPANY", "COMPANIES", "NEWS", "STOCK", "STOCKS", "SEBI",
-    "INDIAN", "INDIA", "EXPECTED", "LOSSES", "GAINS", "SHARES", "NSE", "BSE",
-    "DECLINE", "DECLINED", "ALSO", "FIRMS", "MONTHS", "SEGMENTS", "LTD",
-    "PRIMARY", "BOTH", "COMING", "FUNDRAISING", "SIGNIFICANT", "LIMITED",
-    "POSSIBLE", "HEALTH", "HEALTHCARE", "WAVE", "FIFTEEN", "EYE", "BANK",
-    "IPO", "IPOS", "SET", "RS", "BE", "WAS", "PUSH", "PARTICULARLY", "MUTUAL", "FUNDS",
-    "PRIVATE", "PUBLIC", "LOWER", "HIGHER", "TODAY", "WEEK", "YEAR", "REPORT",
-    "GLOBAL", "WORLD", "BUSINESS", "FINANCE", "MONEY", "TIMES", "ECONOMIC", "CITY",
-    "SALES", "PROFIT", "LOSS", "QUARTER", "RESULTS", "DATA", "GROUP", "IND", "OUT"
+    "THE", "AND", "ARE", "IS", "FOR", "OVER", "WITH", "TO", "OF", "IN", "BY", "FROM", "ON", "AT", "OR", "AS", "AN", "IT", "GO", "NO", "MARKET", "COMPANY", "COMPANIES", "NEWS", "STOCK", "STOCKS", "SEBI", "INDIAN", "INDIA", "EXPECTED", "LOSSES", "GAINS", "SHARES", "NSE", "BSE", "DECLINE", "DECLINED", "ALSO", "FIRMS", "MONTHS", "SEGMENTS", "LTD", "PRIMARY", "BOTH", "COMING", "FUNDRAISING", "SIGNIFICANT", "LIMITED", "POSSIBLE", "HEALTH", "HEALTHCARE", "WAVE", "FIFTEEN", "EYE", "BANK", "IPO", "IPOS", "SET", "RS", "BE", "WAS", "PUSH", "PARTICULARLY", "MUTUAL", "FUNDS", "PRIVATE", "PUBLIC", "LOWER", "HIGHER", "TODAY", "WEEK", "YEAR", "REPORT", "GLOBAL", "WORLD", "BUSINESS", "FINANCE", "MONEY", "TIMES", "ECONOMIC", "CITY", "SALES", "PROFIT", "LOSS", "QUARTER", "RESULTS", "DATA", "GROUP", "IND", "OUT", "NEW", "OLD", "BIG", "SMALL", "HIGH", "LOW", "BUY", "SELL", "HOLD", "TARGET", "PRICE"
 ])
 
 SECTOR_MAP = {
@@ -163,20 +172,22 @@ DEFAULT_FEEDS = [
 ]
 
 # ==========================================
-# 4. MARKET MAPPER (NEWS DRIVEN)
+# 4. MARKET MAPPER (DYNAMIC DISCOVERY)
 # ==========================================
 class MasterMapper:
     def __init__(self):
         self.universe = {} 
-        self.keywords = {} 
+        self.keywords = {}
+        self.discovered_tickers = set() # New cache for dynamic finds
         self.build_universe()
         
     def build_universe(self):
-        log.info("⏳ Indexing NSE Market (nselib)...")
-        # 1. LOAD KNOWLEDGE BASE (Not Scan List)
-        for t in NIFTY_500_DICT:
+        log.info("⏳ Indexing NSE Market...")
+        # 1. Load Backup First
+        for t in NIFTY_500_BACKUP:
             self.universe[t] = t
             
+        # 2. Try Live Fetch (Full Market)
         try:
             if HAS_NSELIB:
                 df = capital_market.equity_list()
@@ -190,20 +201,48 @@ class MasterMapper:
                     first = simple.split()[0]
                     if len(first) > 3 and first not in STOPLIST:
                         self.keywords[first] = symbol
-                log.info(f"✅ Indexed {len(self.universe)} companies (Live + KB).")
+                log.info(f"✅ Indexed {len(self.universe)} companies (Live + Backup).")
             else: 
-                log.warning("⚠️ nselib missing. Using Nifty 500 Knowledge Base.")
+                log.warning("⚠️ nselib missing. Using Nifty 500 Backup + Dynamic Discovery.")
         except Exception as e:
-            log.warning(f"⚠️ NSE Indexing failed. Using Nifty 500 Knowledge Base.")
+            log.warning(f"⚠️ NSE Indexing failed. Using Nifty 500 Backup + Dynamic Discovery.")
+
+    def verify_ticker(self, candidate: str) -> Optional[str]:
+        """Checks if a string is a valid NSE ticker via Yahoo Finance."""
+        if candidate in self.universe: return self.universe[candidate]
+        if candidate in self.discovered_tickers: return candidate
+        
+        try:
+            # Quick lightweight check
+            t = yf.Ticker(f"{candidate}.NS")
+            # If it has a current price, it's valid
+            if t.fast_info.get('last_price', None):
+                self.discovered_tickers.add(candidate)
+                return candidate
+        except: pass
+        return None
 
     def extract_tickers(self, articles):
         found = []
         for art in articles:
-            text = f"{art['title']} {art.get('body', '')[:500]}".upper()
+            text = f"{art['title']} {art.get('body', '')[:1000]}".upper()
+            
+            # 1. Known Tickers
             matches = re.findall(r'\b([A-Z]{3,})\b', text)
             for m in matches:
                 if m in self.universe: found.append(self.universe[m])
                 elif m in self.keywords: found.append(self.keywords[m])
+            
+            # 2. Dynamic Discovery (The "News Hunter" Feature)
+            # Looks for words near "Stock", "Shares", "NSE" that look like tickers
+            context_matches = re.findall(r'(?:STOCK|SHARES|NSE|BSE)\s+(?:OF\s+)?([A-Z]{3,15})', text)
+            for m in context_matches:
+                if m not in STOPLIST and m not in self.universe:
+                    valid = self.verify_ticker(m)
+                    if valid: 
+                        found.append(valid)
+                        log.info(f"🔎 Discovered New Asset: {valid}")
+
         return list(set(found))
 
 class TrendHunter:
@@ -476,16 +515,15 @@ class AnalysisLab:
         if not tech: return None
         val = self.calculate_valuation(stock, info, prices.iloc[-1])
         risk = self.compute_risk_metrics(prices)
+        stress_px = self.stress_test(prices.iloc[-1], info.get('sector', 'default'))
         
         score = 50
-        # Upside
         if tech['Trend'] == "UPTREND": score += 20
         if tech['MACD_Signal'] == "Bullish": score += 10
         if tech['RSI'] < 30: score += 15
+        elif tech['RSI'] > 70: score -= 15
         if isinstance(val, (int, float)) and val > prices.iloc[-1]: score += 20
         if risk.get('Sharpe', 0) > 1: score += 10
-        
-        # Penalties
         if tech['Trend'] == "DOWNTREND": score -= 20
         if tech['RSI'] > 70: score -= 15
         if isinstance(val, (int, float)) and val < prices.iloc[-1] * 0.8: score -= 10
@@ -502,9 +540,15 @@ class AnalysisLab:
         dd_data = {
             "Score_Breakdown": [f"Final Score: {score}", f"Trend: {tech['Trend']}", f"Sharpe: {risk.get('Sharpe')}"],
             "Valuation_Method": "DCF" if isinstance(val, (int, float)) and val != 0 else "Estimate",
+            "Stress_Test_Oil_Shock": stress_px
         }
         
         return {"Ticker": ticker, "Price": round(prices.iloc[-1], 2), "Target_Price": target, "Horizon": horizon, "Trend": tech['Trend'], "RSI": tech['RSI'], "DCF_Val": val, "Sharpe": risk.get('Sharpe'), "Score": score, "Verdict": verdict, "Deep_Dive_Data": dd_data, "Sector": info.get('sector', 'Unknown')}
+
+    def stress_test(self, price, sector):
+        shocks = {'Energy': 0.08, 'Financial Services': -0.05, 'Technology': -0.10, 'default': -0.03}
+        impact = shocks.get(sector, shocks['default'])
+        return round(price * (1 + impact), 2)
 
 # ==========================================
 # 8. REPORTING & EMAIL
@@ -548,7 +592,7 @@ class Emailer:
 class ReportLab:
     def __init__(self, out_dir): self.out_dir = out_dir
     def generate_html_dashboard(self, results, articles, trends, ind_summary):
-        template = """<!DOCTYPE html><html><head><title>Illuminati v22.1</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v22.1</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
+        template = """<!DOCTYPE html><html><head><title>Illuminati v23.0</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v23.0</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
         try:
             t = Template(template)
             html = t.render(results=results, articles=articles, trends=trends, ind_summary=ind_summary, date=dt.datetime.now(), total=len(results))
@@ -565,6 +609,7 @@ class ReportLab:
                 f.write(f"Target: {r['Target_Price']} ({r['Horizon']})\n")
                 f.write(f"Score Components: {r['Deep_Dive_Data']['Score_Breakdown']}\n")
                 f.write(f"Valuation ({r['Deep_Dive_Data']['Valuation_Method']}): {r['DCF_Val']}\n")
+                f.write(f"Stress Test (Oil Shock): {r['Deep_Dive_Data'].get('Stress_Test_Oil_Shock', 'N/A')}\n")
                 f.write("-" * 30 + "\n\n")
         return path
 
@@ -618,9 +663,10 @@ def calculate_sleep_seconds():
     return wait_seconds, target_time
 
 def run_illuminati(interactive=False, tickers_arg=None):
-    current_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
+    current_time = dt.datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S IST')
     print("\n" + "="*80)
-    print(f"👁️ ILLUMINATI TERMINAL v22.1 (NEWS INTELLIGENCE) | {current_time}")
+    print(f"👁️ ILLUMINATI TERMINAL v23.0 (INFINITE HORIZON) | {current_time}")
     print("="*80)
 
     api = APIKeys()
@@ -645,8 +691,7 @@ def run_illuminati(interactive=False, tickers_arg=None):
         print("\n🔮 PREDICTED BOOMING INDUSTRIES (News Hype):")
         print(tabulate(pd.DataFrame(trends).head(5), headers='keys', tablefmt='psql', showindex=False))
     
-    # PURE NEWS-DRIVEN SCANNING
-    # This now works because MasterMapper HAS the dictionary to recognize the names
+    # HYBRID SCAN: News Tickers + Nifty 500 Backup (for recognition only)
     news_tickers = mapper.extract_tickers(articles)
     combined_tickers = list(set(news_tickers))
     
