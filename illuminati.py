@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Illuminati Terminal v21.0 - The "Resilient Titan" Build
+Illuminati Terminal v22.0 - The "Key Master" Build
 FIXES:
-- Imports: Type hints moved to top to fix NameError.
-- Installer: Fixed pip command syntax to prevent 'Invalid requirement'.
-- Data: Embedded NIFTY 500 list ensures massive scan even if NSE fails.
-- Stability: Imports strictly ordered to prevent runtime crashes.
+- AI: Prints available models for your key to debug 404 errors instantly.
+- Time: Forces Asia/Kolkata (IST) timezone for accurate market timestamps.
+- Logic: Retains full "Market Maker" scanning (70+ stocks).
 """
 
-# --- 1. CORE SYSTEM IMPORTS (Must be first) ---
 import sys
 import subprocess
 import importlib.util
@@ -27,9 +25,9 @@ import logging
 import hashlib
 import smtplib
 import datetime as dt
-from typing import List, Dict, Optional, Tuple, Any  # Fixed NameError
+from typing import List, Dict, Optional, Tuple, Any
 
-# --- 2. ROBUST SELF-HEALING INSTALLER ---
+# --- 1. ROBUST INSTALLER ---
 def check_and_install_dependencies():
     required_packages = [
         'nselib', 'yfinance', 'pandas', 'numpy', 'requests', 'feedparser', 
@@ -48,24 +46,16 @@ def check_and_install_dependencies():
     if missing:
         print(f"📦 Installing missing modules: {', '.join(missing)}...")
         try:
-            # Fixed: Properly split arguments for pip
             subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing)
-            print("✅ Base dependencies installed.")
-            
-            # Separate upgrade for AI to avoid conflicts
-            print("🧠 Optimizing AI libraries...")
             subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "google-generativeai"])
-            
+            print("✅ Dependencies installed.")
             importlib.invalidate_caches()
         except subprocess.CalledProcessError as e:
             print(f"❌ Install Error: {e}")
-            # We continue anyway, as some might be pre-installed in different paths
-            pass
 
-# Run installer immediately
 check_and_install_dependencies()
 
-# --- 3. HEAVY IMPORTS (After Install) ---
+# --- 2. IMPORTS ---
 import numpy as np
 import pandas as pd
 import pytz
@@ -108,7 +98,7 @@ except ImportError: HAS_GEMINI = False
 try: from transformers import pipeline as hf_pipeline; HAS_HF = True
 except ImportError: HAS_HF = False
 
-# --- 4. CONFIGURATION ---
+# --- 3. CONFIGURATION ---
 nest_asyncio.apply()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("Illuminati")
@@ -122,27 +112,21 @@ CACHE_DIR.mkdir(exist_ok=True)
 if hasattr(ssl, '_create_unverified_context'):
     ssl._create_default_https_context = ssl._create_unverified_context
 
-# --- THE STATIC UNIVERSE (Safety Net) ---
-# Guaranteed 500+ Stocks if NSE Scraper Fails
-NIFTY_500_BACKUP = [
-    'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'INFY', 'SBIN', 'BHARTIARTL', 'ITC', 'LICI', 'HINDUNILVR',
-    'LT', 'BAJFINANCE', 'HCLTECH', 'MARUTI', 'SUNPHARMA', 'ADANIENT', 'TATAMOTORS', 'TITAN', 'KOTAKBANK',
-    'ONGC', 'AXISBANK', 'NTPC', 'ULTRACEMCO', 'ADANIPORTS', 'POWERGRID', 'M&M', 'WIPRO', 'BAJAJFINSV',
-    'HAL', 'COALINDIA', 'IOC', 'DLF', 'ZOMATO', 'JIOFIN', 'SIEMENS', 'SBILIFE', 'TATASTEEL', 'GRASIM',
-    'BEL', 'VBL', 'LTIM', 'TRENT', 'ADANIGREEN', 'ADANIPOWER', 'HINDALCO', 'INDUSINDBK', 'BANKBARODA',
-    'HDFCLIFE', 'EICHERMOT', 'BPCL', 'ABB', 'GODREJCP', 'PIDILITIND', 'TECHM', 'BRITANNIA', 'PFC',
-    'RECLTD', 'CIPLA', 'AMBUJACEM', 'GAIL', 'TATAPOWER', 'CANBK', 'VEDL', 'INDIGO', 'UNIONBANK',
-    'CHOLAFIN', 'HAVELLS', 'HEROMOTOCO', 'DABUR', 'JSWSTEEL', 'SHREECEM', 'TVSMOTOR', 'DRREDDY',
-    'BOSCHLTD', 'JINDALSTEL', 'PNB', 'NHPC', 'APOLLOHOSP', 'LODHA', 'DIVISLAB', 'IOB', 'MAXHEALTH',
-    'POLYCAB', 'SOLARINDS', 'IDBI', 'IRFC', 'TORNTPHARM', 'MANKIND', 'CUMMINSIND', 'ICICIGI', 'CGPOWER',
-    'SHRIRAMFIN', 'COLPAL', 'MOTHERSON', 'MUTHOOTFIN', 'BERGEPAINT', 'TATAELXSI', 'ASTRAL', 'MARICO',
-    'ALKEM', 'PERSISTENT', 'SRF', 'IRCTC', 'MPHASIS', 'OBEROIRLTY', 'BHARATFORG', 'SBICARD', 'ASHOKLEY',
-    'INDHOTEL', 'ZEEL', 'VOLTAS', 'PIIND', 'UPL', 'APLAPOLLO', 'GUJGASLTD', 'MRF', 'AUROPHARMA',
-    'LTTS', 'SUPREMEIND', 'TIINDIA', 'PETRONET', 'CONCOR', 'LALPATHLAB', 'ABCAPITAL', 'POLICYBZR',
-    'LINDEINDIA', 'DALBHARAT', 'SCHAEFFLER', 'GMRINFRA', 'PHOENIXLTD', 'KPITTECH', 'FLUOROCHEM',
-    'PRESTIGE', 'PAGEIND', 'BANDHANBNK', 'UNOMINDA', 'ACC', 'PATANJALI', 'THERMAX', 'SUZLON',
-    'FEDERALBNK', 'IDFCFIRSTB', 'MAHABANK', 'STARHEALTH', 'UBL', 'HONAUT', 'AUBANK', 'TATACOMM',
-    'DIXON', 'BANKINDIA', 'KEYSTONE', 'SOLARA', 'MAZDOCK', 'RVNL', 'FACT', 'COCHINSHIP', 'IREDA'
+# HARDCODED BACKUP UNIVERSE (NIFTY 100)
+NIFTY_100_BACKUP = [
+    'ABB', 'ACC', 'ADANIENSOL', 'ADANIENT', 'ADANIGREEN', 'ADANIPORTS', 'ADANIPOWER', 'ATGL', 
+    'AMBUJACEM', 'APOLLOHOSP', 'ASIANPAINT', 'DMART', 'AXISBANK', 'BAJAJ-AUTO', 'BAJFINANCE', 
+    'BAJAJFINSV', 'BAJAJHLDNG', 'BANKBARODA', 'BERGEPAINT', 'BEL', 'BPCL', 'BHARTIARTL', 
+    'BOSCHLTD', 'BRITANNIA', 'CANBK', 'CHOLAFIN', 'CIPLA', 'COALINDIA', 'COLPAL', 'DLF', 
+    'DABUR', 'DIVISLAB', 'DRREDDY', 'EICHERMOT', 'GAIL', 'GODREJCP', 'GRASIM', 'HCLTECH', 
+    'HDFCBANK', 'HDFCLIFE', 'HAVELLS', 'HEROMOTOCO', 'HINDALCO', 'HAL', 'HINDPETRO', 
+    'HINDUNILVR', 'ICICIBANK', 'ICICIGI', 'ICICIPRULI', 'ITC', 'IOC', 'IRCTC', 'INDUSINDBK', 
+    'NAUKRI', 'INFY', 'INDIGO', 'JSWSTEEL', 'JINDALSTEL', 'JIOFIN', 'KOTAKBANK', 'LTIM', 
+    'LT', 'LICI', 'M&M', 'MARICO', 'MARUTI', 'NTPC', 'NESTLEIND', 'ONGC', 'PIDILITIND', 
+    'PFC', 'POWERGRID', 'PNB', 'RECLTD', 'RELIANCE', 'SBICARD', 'SBILIFE', 'SRF', 
+    'SHREECEM', 'SHRIRAMFIN', 'SIEMENS', 'SBIN', 'SUNPHARMA', 'TVSMOTOR', 'TCS', 
+    'TATACONSUM', 'TATAMOTORS', 'TATAPOWER', 'TATASTEEL', 'TECHM', 'TITAN', 'TORNTPHARM', 
+    'TRENT', 'ULTRACEMCO', 'UNIONBANK', 'UPL', 'VBL', 'VEDL', 'WIPRO', 'ZOMATO', 'ZYYDUSLIFE'
 ]
 
 STOPLIST = set([
@@ -191,7 +175,7 @@ DEFAULT_FEEDS = [
 ]
 
 # ==========================================
-# 5. MARKET MAPPER (HYBRID ENGINE)
+# 4. MARKET MAPPER (HYBRID)
 # ==========================================
 class MasterMapper:
     def __init__(self):
@@ -201,11 +185,9 @@ class MasterMapper:
         
     def build_universe(self):
         log.info("⏳ Indexing NSE Market...")
-        # 1. Load Hardcoded Backup First (Guarantees Results)
-        for t in NIFTY_500_BACKUP:
+        for t in NIFTY_100_BACKUP:
             self.universe[t] = t
             
-        # 2. Try Live Fetch (Bonus)
         try:
             if HAS_NSELIB:
                 df = capital_market.equity_list()
@@ -221,9 +203,9 @@ class MasterMapper:
                         self.keywords[first] = symbol
                 log.info(f"✅ Indexed {len(self.universe)} companies (Live + Backup).")
             else: 
-                log.warning("⚠️ nselib missing. Using Nifty 500 Backup.")
+                log.warning("⚠️ nselib missing. Using Nifty 100 Backup.")
         except Exception as e:
-            log.warning(f"⚠️ NSE Indexing failed. Using Nifty 500 Backup.")
+            log.warning(f"⚠️ NSE Indexing failed. Using Nifty 100 Backup.")
 
     def extract_tickers(self, articles):
         found = []
@@ -254,7 +236,7 @@ class TrendHunter:
         return sorted(trends, key=lambda x: x['Hype_Score'], reverse=True)
 
 # ==========================================
-# 6. UTILITIES
+# 5. UTILITIES
 # ==========================================
 class APIKeys:
     def __init__(self):
@@ -321,7 +303,7 @@ class DatabaseManager:
         self.conn.commit()
 
 # ==========================================
-# 7. NEWS ENGINE
+# 6. NEWS ENGINE
 # ==========================================
 class NewsEngine:
     def __init__(self, api_keys: APIKeys):
@@ -410,7 +392,7 @@ class NewsEngine:
         return unique
 
 # ==========================================
-# 8. ANALYSIS & STRATEGY
+# 7. ANALYSIS & STRATEGY
 # ==========================================
 class DataEngine:
     def __init__(self, api_keys: APIKeys):
@@ -507,14 +489,13 @@ class AnalysisLab:
         risk = self.compute_risk_metrics(prices)
         
         score = 50
-        # Upside
         if tech['Trend'] == "UPTREND": score += 20
         if tech['MACD_Signal'] == "Bullish": score += 10
         if tech['RSI'] < 30: score += 15
+        elif tech['RSI'] > 70: score -= 15
         if isinstance(val, (int, float)) and val > prices.iloc[-1]: score += 20
         if risk.get('Sharpe', 0) > 1: score += 10
         
-        # Penalties
         if tech['Trend'] == "DOWNTREND": score -= 20
         if tech['RSI'] > 70: score -= 15
         if isinstance(val, (int, float)) and val < prices.iloc[-1] * 0.8: score -= 10
@@ -536,7 +517,7 @@ class AnalysisLab:
         return {"Ticker": ticker, "Price": round(prices.iloc[-1], 2), "Target_Price": target, "Horizon": horizon, "Trend": tech['Trend'], "RSI": tech['RSI'], "DCF_Val": val, "Sharpe": risk.get('Sharpe'), "Score": score, "Verdict": verdict, "Deep_Dive_Data": dd_data, "Sector": info.get('sector', 'Unknown')}
 
 # ==========================================
-# 9. REPORTING & EMAIL
+# 8. REPORTING & EMAIL
 # ==========================================
 class Emailer:
     def __init__(self, api_keys: APIKeys):
@@ -577,7 +558,7 @@ class Emailer:
 class ReportLab:
     def __init__(self, out_dir): self.out_dir = out_dir
     def generate_html_dashboard(self, results, articles, trends, ind_summary):
-        template = """<!DOCTYPE html><html><head><title>Illuminati v21.0</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v21.0</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
+        template = """<!DOCTYPE html><html><head><title>Illuminati v22.0</title><style>body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}.card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}.badge{padding:4px 8px;border-radius:4px;font-weight:bold}.buy{background:#065f46;color:#34d399}.sell{background:#7f1d1d;color:#f87171}.hold{background:#854d0e;color:#fef08a}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}th{color:#94a3b8}</style></head><body><h1>👁️ Illuminati Terminal v22.0</h1><p>Assets Analyzed: {{ total }} | Date: {{ date }}</p><h2>🔮 Future Booming Industries</h2><table><thead><tr><th>Theme</th><th>Hype Score</th><th>Mentions</th></tr></thead><tbody>{% for t in trends %}<tr><td><b>{{ t.Theme }}</b></td><td>{{ t.Hype_Score }}%</td><td>{{ t.Mentions }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Industry Momentum</h2><table><thead><tr><th>Sector</th><th>Avg Score</th><th>Top Verdict</th></tr></thead><tbody>{% for s, data in ind_summary.items() %}<tr><td><b>{{ s }}</b></td><td>{{ data['avg_score'] }}</td><td>{{ data['verdict'] }}</td></tr>{% endfor %}</tbody></table><h2>🚀 Investment Strategy</h2><table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>{% for r in results %}<tr><td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td><td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td><td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td></tr>{% endfor %}</tbody></table><h2>📰 Market Intel</h2>{% for a in articles[:8] %}<div class="card"><h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3><p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p><p>{{ a.body[:250] }}...</p></div>{% endfor %}</body></html>"""
         try:
             t = Template(template)
             html = t.render(results=results, articles=articles, trends=trends, ind_summary=ind_summary, date=dt.datetime.now(), total=len(results))
@@ -608,17 +589,23 @@ class GeminiBrain:
     def generate_narrative(self, df_summary):
         if not self.active: return "LLM Analysis Disabled."
         
+        # KEY AI FIX: Dynamic Discovery (Brute Force Check)
         try:
             available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            print(f"🤖 Available Models for your key: {available}")
         except: available = []
         
-        priority = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']
-        chosen = next((m for m in priority if m in available), 'models/gemini-pro')
+        # Priority list (Flash -> Pro -> Vision)
+        priority = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro-001']
+        chosen = next((m for m in priority if m in available), available[0] if available else None)
         
+        if not chosen: return "AI Error: No compatible models found."
+
         try:
-            log.info(f"🤖 Generating Insight with {chosen}...")
+            log.info(f"🤖 Generating Insight with: {chosen}")
             self.model = genai.GenerativeModel(chosen)
-            return self.model.generate_content(f"Analyze this Indian Stock Market data:\n{df_summary.to_csv()}").text
+            csv_data = df_summary.to_csv()
+            return self.model.generate_content(f"Analyze this Indian Stock Market data:\n{csv_data}").text
         except Exception as e:
             return f"LLM Error: {e}"
 
@@ -634,22 +621,26 @@ def print_deep_dive_console(asset):
     print(f"Score Factors: {asset['Deep_Dive_Data']['Score_Breakdown']}")
 
 # ==========================================
-# 10. SCHEDULER & ORCHESTRATOR
+# 9. SCHEDULER & ORCHESTRATOR
 # ==========================================
 def calculate_sleep_seconds():
-    now = dt.datetime.now(dt.timezone.utc)
-    is_utc = time.localtime().tm_gmtoff == 0
-    target_utc_hour = 2 if is_utc else 8
-    target_utc_min = 30 if is_utc else 0
-    target_time = now.replace(hour=target_utc_hour, minute=target_utc_min, second=0, microsecond=0)
-    if now >= target_time: target_time += dt.timedelta(days=1)
+    # FORCE IST TIMEZONE
+    ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
+    now = dt.datetime.now(ist)
+    target_time = now.replace(hour=8, minute=0, second=0, microsecond=0)
+    
+    if now >= target_time: 
+        target_time += dt.timedelta(days=1)
+        
     wait_seconds = (target_time - now).total_seconds()
     return wait_seconds, target_time
 
 def run_illuminati(interactive=False, tickers_arg=None):
-    current_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # FORCE IST DISPLAY
+    ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
+    current_time = dt.datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S IST')
     print("\n" + "="*80)
-    print(f"👁️ ILLUMINATI TERMINAL v21.0 (RESILIENT TITAN) | {current_time}")
+    print(f"👁️ ILLUMINATI TERMINAL v22.0 (KEY MASTER) | {current_time}")
     print("="*80)
 
     api = APIKeys()
@@ -674,16 +665,14 @@ def run_illuminati(interactive=False, tickers_arg=None):
         print("\n🔮 PREDICTED BOOMING INDUSTRIES (News Hype):")
         print(tabulate(pd.DataFrame(trends).head(5), headers='keys', tablefmt='psql', showindex=False))
     
-    # HYBRID SCANNING: News Tickers + NIFTY 500 BACKUP
+    # HYBRID SCAN: News + Nifty 100 Backup
     news_tickers = mapper.extract_tickers(articles)
-    combined_tickers = list(set(news_tickers + NIFTY_500_BACKUP))
-    
+    combined_tickers = list(set(news_tickers + NIFTY_100_BACKUP))
     if tickers_arg: combined_tickers.extend(tickers_arg.split(','))
     
-    print(f"\n⚡ Analyzing {len(combined_tickers)} Assets (Full Market Scan)...")
+    print(f"\n⚡ Analyzing {len(combined_tickers)} Assets (Hybrid Scan)...")
     results = []
     
-    # Batch Processing for Speed
     with ThreadPoolExecutor(max_workers=20) as executor:
         def process_ticker(t):
             try:
@@ -692,7 +681,7 @@ def run_illuminati(interactive=False, tickers_arg=None):
                 res = lab.analyze_asset(t, prices, info, stock, src)
                 if res: return res
             except: return None
-            
+        
         futures = [executor.submit(process_ticker, t) for t in combined_tickers]
         for f in futures:
             res = f.result()
@@ -752,16 +741,6 @@ def schedule_job():
         time.sleep(wait_seconds)
         if dt.datetime.now().weekday() < 5: run_illuminati()
         else: print("Skipping run (Weekend).")
-
-def calculate_sleep_seconds():
-    now = dt.datetime.now(dt.timezone.utc)
-    is_utc = time.localtime().tm_gmtoff == 0
-    target_utc_hour = 2 if is_utc else 8
-    target_utc_min = 30 if is_utc else 0
-    target_time = now.replace(hour=target_utc_hour, minute=target_utc_min, second=0, microsecond=0)
-    if now >= target_time: target_time += dt.timedelta(days=1)
-    wait_seconds = (target_time - now).total_seconds()
-    return wait_seconds, target_time
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
