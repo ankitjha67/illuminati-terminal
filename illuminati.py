@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Illuminati Terminal v22.0 - The "Key Master" Build
-FIXES:
-- AI: Prints available models for your key to debug 404 errors instantly.
-- Time: Forces Asia/Kolkata (IST) timezone for accurate market timestamps.
-- Logic: Retains full "Market Maker" scanning (70+ stocks).
+Illuminati Terminal v22.0 - The "News Hunter" Build
+CHANGES:
+- Removed NIFTY 500 Default List.
+- Strategy: Scans 100% based on News/RSS signals.
+- Architecture: Retains Self-Healing, Universal AI, and full Reporting suite.
 """
 
 import sys
@@ -27,7 +27,7 @@ import smtplib
 import datetime as dt
 from typing import List, Dict, Optional, Tuple, Any
 
-# --- 1. ROBUST INSTALLER ---
+# --- 1. ROBUST SELF-HEALING INSTALLER ---
 def check_and_install_dependencies():
     required_packages = [
         'nselib', 'yfinance', 'pandas', 'numpy', 'requests', 'feedparser', 
@@ -112,23 +112,6 @@ CACHE_DIR.mkdir(exist_ok=True)
 if hasattr(ssl, '_create_unverified_context'):
     ssl._create_default_https_context = ssl._create_unverified_context
 
-# HARDCODED BACKUP UNIVERSE (NIFTY 100)
-NIFTY_100_BACKUP = [
-    'ABB', 'ACC', 'ADANIENSOL', 'ADANIENT', 'ADANIGREEN', 'ADANIPORTS', 'ADANIPOWER', 'ATGL', 
-    'AMBUJACEM', 'APOLLOHOSP', 'ASIANPAINT', 'DMART', 'AXISBANK', 'BAJAJ-AUTO', 'BAJFINANCE', 
-    'BAJAJFINSV', 'BAJAJHLDNG', 'BANKBARODA', 'BERGEPAINT', 'BEL', 'BPCL', 'BHARTIARTL', 
-    'BOSCHLTD', 'BRITANNIA', 'CANBK', 'CHOLAFIN', 'CIPLA', 'COALINDIA', 'COLPAL', 'DLF', 
-    'DABUR', 'DIVISLAB', 'DRREDDY', 'EICHERMOT', 'GAIL', 'GODREJCP', 'GRASIM', 'HCLTECH', 
-    'HDFCBANK', 'HDFCLIFE', 'HAVELLS', 'HEROMOTOCO', 'HINDALCO', 'HAL', 'HINDPETRO', 
-    'HINDUNILVR', 'ICICIBANK', 'ICICIGI', 'ICICIPRULI', 'ITC', 'IOC', 'IRCTC', 'INDUSINDBK', 
-    'NAUKRI', 'INFY', 'INDIGO', 'JSWSTEEL', 'JINDALSTEL', 'JIOFIN', 'KOTAKBANK', 'LTIM', 
-    'LT', 'LICI', 'M&M', 'MARICO', 'MARUTI', 'NTPC', 'NESTLEIND', 'ONGC', 'PIDILITIND', 
-    'PFC', 'POWERGRID', 'PNB', 'RECLTD', 'RELIANCE', 'SBICARD', 'SBILIFE', 'SRF', 
-    'SHREECEM', 'SHRIRAMFIN', 'SIEMENS', 'SBIN', 'SUNPHARMA', 'TVSMOTOR', 'TCS', 
-    'TATACONSUM', 'TATAMOTORS', 'TATAPOWER', 'TATASTEEL', 'TECHM', 'TITAN', 'TORNTPHARM', 
-    'TRENT', 'ULTRACEMCO', 'UNIONBANK', 'UPL', 'VBL', 'VEDL', 'WIPRO', 'ZOMATO', 'ZYYDUSLIFE'
-]
-
 STOPLIST = set([
     "THE", "AND", "ARE", "IS", "FOR", "OVER", "WITH", "TO", "OF", "IN",
     "BY", "FROM", "ON", "AT", "OR", "AS", "AN", "IT", "GO", "NO",
@@ -175,7 +158,7 @@ DEFAULT_FEEDS = [
 ]
 
 # ==========================================
-# 4. MARKET MAPPER (HYBRID)
+# 4. MARKET MAPPER (NEWS DRIVEN)
 # ==========================================
 class MasterMapper:
     def __init__(self):
@@ -184,10 +167,8 @@ class MasterMapper:
         self.build_universe()
         
     def build_universe(self):
-        log.info("⏳ Indexing NSE Market...")
-        for t in NIFTY_100_BACKUP:
-            self.universe[t] = t
-            
+        log.info("⏳ Indexing NSE Market (nselib)...")
+        # Core Mapping Logic
         try:
             if HAS_NSELIB:
                 df = capital_market.equity_list()
@@ -201,11 +182,15 @@ class MasterMapper:
                     first = simple.split()[0]
                     if len(first) > 3 and first not in STOPLIST:
                         self.keywords[first] = symbol
-                log.info(f"✅ Indexed {len(self.universe)} companies (Live + Backup).")
+                log.info(f"✅ Indexed {len(self.universe)} companies for recognition.")
             else: 
-                log.warning("⚠️ nselib missing. Using Nifty 100 Backup.")
+                # Basic Fallback Dictionary just for name recognition
+                # This is NOT a scan list, just a dictionary to map "Reliance" -> "RELIANCE"
+                log.warning("⚠️ nselib missing. Using minimal fallback map.")
+                defaults = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK', 'SBIN', 'TATAMOTORS', 'ITC', 'BAJFINANCE', 'LT', 'MARUTI']
+                for d in defaults: self.universe[d] = d
         except Exception as e:
-            log.warning(f"⚠️ NSE Indexing failed. Using Nifty 100 Backup.")
+            log.warning(f"⚠️ NSE Indexing failed. News recognition might be limited.")
 
     def extract_tickers(self, articles):
         found = []
@@ -489,13 +474,14 @@ class AnalysisLab:
         risk = self.compute_risk_metrics(prices)
         
         score = 50
+        # Upside
         if tech['Trend'] == "UPTREND": score += 20
         if tech['MACD_Signal'] == "Bullish": score += 10
         if tech['RSI'] < 30: score += 15
-        elif tech['RSI'] > 70: score -= 15
         if isinstance(val, (int, float)) and val > prices.iloc[-1]: score += 20
         if risk.get('Sharpe', 0) > 1: score += 10
         
+        # Penalties
         if tech['Trend'] == "DOWNTREND": score -= 20
         if tech['RSI'] > 70: score -= 15
         if isinstance(val, (int, float)) and val < prices.iloc[-1] * 0.8: score -= 10
@@ -589,17 +575,15 @@ class GeminiBrain:
     def generate_narrative(self, df_summary):
         if not self.active: return "LLM Analysis Disabled."
         
-        # KEY AI FIX: Dynamic Discovery (Brute Force Check)
+        # DYNAMIC DISCOVERY: The key to fixing 404s
         try:
             available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            print(f"🤖 Available Models for your key: {available}")
         except: available = []
         
-        # Priority list (Flash -> Pro -> Vision)
-        priority = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro-001']
+        priority = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro', 'models/gemini-1.0-pro']
         chosen = next((m for m in priority if m in available), available[0] if available else None)
         
-        if not chosen: return "AI Error: No compatible models found."
+        if not chosen: return "AI Error: No text-generation models found for this API Key."
 
         try:
             log.info(f"🤖 Generating Insight with: {chosen}")
@@ -624,7 +608,7 @@ def print_deep_dive_console(asset):
 # 9. SCHEDULER & ORCHESTRATOR
 # ==========================================
 def calculate_sleep_seconds():
-    # FORCE IST TIMEZONE
+    # FORCE IST TIMEZONE (GMT+5:30)
     ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
     now = dt.datetime.now(ist)
     target_time = now.replace(hour=8, minute=0, second=0, microsecond=0)
@@ -640,7 +624,7 @@ def run_illuminati(interactive=False, tickers_arg=None):
     ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
     current_time = dt.datetime.now(ist).strftime('%Y-%m-%d %H:%M:%S IST')
     print("\n" + "="*80)
-    print(f"👁️ ILLUMINATI TERMINAL v22.0 (KEY MASTER) | {current_time}")
+    print(f"👁️ ILLUMINATI TERMINAL v22.0 (NEWS HUNTER) | {current_time}")
     print("="*80)
 
     api = APIKeys()
@@ -665,12 +649,18 @@ def run_illuminati(interactive=False, tickers_arg=None):
         print("\n🔮 PREDICTED BOOMING INDUSTRIES (News Hype):")
         print(tabulate(pd.DataFrame(trends).head(5), headers='keys', tablefmt='psql', showindex=False))
     
-    # HYBRID SCAN: News + Nifty 100 Backup
+    # PURE NEWS-DRIVEN SCANNING
     news_tickers = mapper.extract_tickers(articles)
-    combined_tickers = list(set(news_tickers + NIFTY_100_BACKUP))
+    combined_tickers = list(set(news_tickers))
+    
+    # Allow manual override via command line
     if tickers_arg: combined_tickers.extend(tickers_arg.split(','))
     
-    print(f"\n⚡ Analyzing {len(combined_tickers)} Assets (Hybrid Scan)...")
+    if not combined_tickers:
+        print("⚠️ No tickers found in current news cycle. Try again later or add manual tickers.")
+        return
+
+    print(f"\n⚡ Analyzing {len(combined_tickers)} Assets (News Discovery)...")
     results = []
     
     with ThreadPoolExecutor(max_workers=20) as executor:
@@ -741,6 +731,16 @@ def schedule_job():
         time.sleep(wait_seconds)
         if dt.datetime.now().weekday() < 5: run_illuminati()
         else: print("Skipping run (Weekend).")
+
+def calculate_sleep_seconds():
+    now = dt.datetime.now(dt.timezone.utc)
+    is_utc = time.localtime().tm_gmtoff == 0
+    target_utc_hour = 2 if is_utc else 8
+    target_utc_min = 30 if is_utc else 0
+    target_time = now.replace(hour=target_utc_hour, minute=target_utc_min, second=0, microsecond=0)
+    if now >= target_time: target_time += dt.timedelta(days=1)
+    wait_seconds = (target_time - now).total_seconds()
+    return wait_seconds, target_time
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
