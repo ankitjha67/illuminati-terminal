@@ -13,12 +13,20 @@ ENRICHMENT REQUEST (Dec-16-2025):
 - Use Option A in EVERY run: Always attempt to download EQUITY_L.csv from nsearchives.nseindia.com each execution.
   Fallback to local cached cache/EQUITY_L.csv only if download fails.
 
-PATCHSET (Dec-17-2025):
+PATCHSET (Dec-17-2025+):
 - GLOBAL NEWS: Add reputable global RSS feeds + Google News site-feeds (FT/WSJ/MarketWatch/TradingView).
 - OUTPUT: Add Company column separate from Ticker (offline from NSE EQUITY_L ingest).
 - DCF: Avoid N/A by improving cashflow parsing + safe numeric fallback.
 - SECTOR: Reduce Unknown/default via offline sector inference from Company name and normalization for Industry Momentum.
 - DEP CHECK: Fix false "missing" due to pip-name vs import-name mismatch (bs4/dateutil/google.generativeai).
+
+PATCHSET (Verification + Disclaimer + Email Readability):
+- VERIFICATION FULL COVERAGE: Verification Summary covers 100% tickers (not top 25).
+- TradingView scan: BATCHED + DISK CACHED + best-effort fallback to Neutral if throttled.
+- News sentiment: per-ticker aggregation using mapper extraction per-article.
+- Fundamental verdict: derived from DCF vs Price (plus stable fallback).
+- DISCLAIMER: included in Excel, Dashboard, Deep Dive text, Zip bundle, Email body.
+- EMAIL: readable HTML body + plaintext fallback; supports multiple recipients via EMAIL_TO (comma/semicolon separated).
 """
 
 import sys
@@ -40,10 +48,22 @@ import smtplib
 import datetime as dt
 import io
 import csv
-from typing import List, Dict, Optional, Any
+import zipfile
+import textwrap
+import warnings
+from typing import List, Dict, Optional, Any, Tuple
 from pathlib import Path
 from urllib.parse import urlparse, quote_plus
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+# --- 0. WARNINGS (non-breaking; reduces noisy notebook deprecation warnings) ---
+warnings.filterwarnings(
+    "ignore",
+    message=r".*datetime\.datetime\.utcnow\(\) is deprecated.*",
+    category=DeprecationWarning,
+    module=r"jupyter_client\..*"
+)
 
 # --- 1. ROBUST SELF-HEALING INSTALLER ---
 def check_and_install_dependencies():
@@ -71,7 +91,6 @@ def check_and_install_dependencies():
             if importlib.util.find_spec(mod) is None:
                 missing.append(package)
         except Exception:
-            # If find_spec is unhappy for dotted modules on some envs, be safe:
             try:
                 __import__(mod)
             except Exception:
@@ -101,6 +120,7 @@ import nest_asyncio
 from requests.adapters import HTTPAdapter, Retry
 from tabulate import tabulate
 from textblob import TextBlob
+
 # Guard: some old codebases had a typo "Beautifulsoup" (wrong). Keep it harmless.
 try:
     from bs4 import Beautifulsoup  # noqa: F401
@@ -151,6 +171,7 @@ try:
 except ImportError:
     HAS_HF = False
 
+
 # --- 3. CONFIGURATION & DATA ---
 nest_asyncio.apply()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -164,6 +185,26 @@ CACHE_DIR.mkdir(exist_ok=True, parents=True)
 
 if hasattr(ssl, '_create_unverified_context'):
     ssl._create_default_https_context = ssl._create_unverified_context
+
+DISCLAIMER_TEXT = (
+    "DISCLAIMER: This content is provided strictly for educational and research purposes only. "
+    "It is not financial, investment, trading, legal, tax, accounting, or any other professional advice, "
+    "and should not be treated as a recommendation to buy, sell, hold, or transact in any security, derivative, "
+    "cryptocurrency, commodity, or any other financial instrument.\n\n"
+    "All information, examples, opinions, analyses, code snippets, backtests, charts, and outputs are shared “as is” "
+    "without any warranty of accuracy, completeness, timeliness, reliability, or fitness for a particular purpose. "
+    "Markets are risky and volatile; past performance is not indicative of future results. Any strategies, indicators, "
+    "models, signals, or backtested results may be affected by assumptions, data quality issues, survivorship bias, "
+    "look-ahead bias, slippage, latency, fees, taxes, execution constraints, liquidity, and changing market regimes—"
+    "meaning real-world performance can differ materially.\n\n"
+    "You are solely responsible for your decisions and actions. Do your own due diligence and consult a SEBI-registered "
+    "investment adviser or other qualified professional before making any financial decision. By using or relying on this "
+    "content, you acknowledge that the author/creator shall not be liable for any direct or indirect loss, damages, or "
+    "consequences (including financial losses) arising from the use of this information or any related tools/scripts.\n\n"
+    "If any third-party sources (e.g., websites, APIs, data providers, brokers) are referenced or used, their content and "
+    "availability are outside the author’s control, and you must comply with their respective terms, policies, and applicable "
+    "laws/regulations."
+)
 
 # --- USER WATCHLIST (Priority) ---
 USER_WATCHLIST = [
@@ -247,15 +288,12 @@ FUTURE_THEMES = {
 # GLOBAL NEWS PATCH: Add reputable global RSS + robust Google News site-feeds
 # -----------------------------------------------------------------------------
 GLOBAL_FEEDS = [
-    # Direct RSS (global)
-    "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",  # WSJ Markets RSS
-    "https://feeds.marketwatch.com/marketwatch/topstories/",  # MarketWatch Top Stories RSS
-    "https://www.cnbc.com/id/100003114/device/rss/rss.html",  # CNBC Top News RSS
-    "https://www.cnbc.com/id/10000664/device/rss/rss.html",  # CNBC Finance RSS (commonly used)
+    "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",                 # WSJ Markets RSS
+    "https://feeds.marketwatch.com/marketwatch/topstories/",        # MarketWatch Top Stories RSS
+    "https://www.cnbc.com/id/100003114/device/rss/rss.html",        # CNBC Top News RSS
+    "https://www.cnbc.com/id/10000664/device/rss/rss.html",         # CNBC Finance RSS
     "https://www.theguardian.com/uk/business/rss",
     "https://www.investing.com/rss/news.rss",
-
-    # Google News RSS (site filters) - works even when publishers don't expose RSS
     "https://news.google.com/rss/search?q=site:ft.com+markets+when:7d&hl=en&gl=US&ceid=US:en",
     "https://news.google.com/rss/search?q=site:wsj.com+markets+when:7d&hl=en&gl=US&ceid=US:en",
     "https://news.google.com/rss/search?q=site:marketwatch.com+markets+when:7d&hl=en&gl=US&ceid=US:en",
@@ -264,7 +302,6 @@ GLOBAL_FEEDS = [
 ]
 
 DEFAULT_FEEDS = [
-    # India core
     "https://news.google.com/rss/search?q=site:moneycontrol.com+when:7d&hl=en-IN&gl=IN&ceid=IN:en",
     "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
     "https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms",
@@ -273,8 +310,6 @@ DEFAULT_FEEDS = [
     "https://www.financialexpress.com/market/feed/",
     "https://feeds.reuters.com/reuters/INbusinessNews",
     "https://feeds.bloomberg.com/markets/news.rss",
-
-    # Global expansion
     *GLOBAL_FEEDS
 ]
 
@@ -311,6 +346,7 @@ def make_retry_session(user_agent: str = "Mozilla/5.0", total_retries: int = 5) 
     s.mount("http://", adapter)
     return s
 
+
 # =============================================================================
 # Offline sector inference (PATCH) to reduce Unknown/default
 # =============================================================================
@@ -320,31 +356,18 @@ def infer_sector_from_name(company_name: str) -> str:
     if not n:
         return "Unclassified"
 
-    # Financials
     if any(k in n for k in ["BANK", "FINANCE", "FINANCIAL", "INSURANCE", "NBFC", "CAPITAL", "BROKING", "SECURITIES", "HOUSING", "AMC"]):
         return "Financial Services"
-
-    # Healthcare
     if any(k in n for k in ["PHARMA", "PHARM", "HEALTH", "HOSPITAL", "DIAGNOST", "BIOTECH", "LAB", "LIFE SCIENCE", "MEDICAL"]):
         return "Healthcare"
-
-    # Technology
     if any(k in n for k in ["TECH", "SOFTWARE", "INFOTECH", "INFORMATION", "IT SERVICES", "DIGITAL", "SYSTEMS", "DATA", "CYBER", "CLOUD"]):
         return "Technology"
-
-    # Energy
     if any(k in n for k in ["OIL", "GAS", "PETRO", "REFIN", "COAL", "ENERGY", "EXPLORATION"]):
         return "Energy"
-
-    # Utilities
     if any(k in n for k in ["POWER", "ELECTRIC", "UTILITY", "TRANSMISSION", "GRID", "WATER"]):
         return "Utilities"
-
-    # Defense
-    if any(k in n for k in ["DEFENCE", "DEFENSE", "AEROSPACE", "MISSILE", "DRONE", "ORDNANCE", "ARMAMENT", "HAL", "BEL"]):
+    if any(k in n for k in ["DEFENCE", "DEFENSE", "AEROSPACE", "MISSILE", "DRONE", "ORDNANCE", "ARMAMENT", "SHIPYARD", "HAL", "BEL"]):
         return "Defense"
-
-    # Consumer cyclical (rough)
     if any(k in n for k in ["AUTO", "MOTORS", "TYRE", "RETAIL", "CONSUMER", "FASHION", "LIFESTYLE", "HOTEL", "TRAVEL", "JEWELL", "CEMENT", "PAINT"]):
         return "Consumer Cyclical"
 
@@ -354,9 +377,18 @@ def normalize_sector(sector: str) -> str:
     s = (sector or "").strip()
     if not s:
         return "Unclassified"
-    if s.lower() in ["unknown", "default", "n/a", "na", "none", "null"]:
+    if s.lower() in ["unknown", "default", "n/a", "na", "none", "null", "unclassified"]:
         return "Unclassified"
     return s
+
+def safe_ratio(a: float, b: float, default: float = 0.0) -> float:
+    try:
+        if b == 0:
+            return default
+        return float(a) / float(b)
+    except Exception:
+        return default
+
 
 # =============================================================================
 # 4. MARKET MAPPER (TITAN ENGINE) - ENRICHED
@@ -399,7 +431,6 @@ class MasterMapper:
         raw_name = str(name or "").strip()
         nm = raw_name.upper().strip()
         if nm:
-            # Store human-readable name (keep original casing as best-effort)
             self.symbol_names[sym] = raw_name
 
             self.universe[nm] = sym
@@ -519,13 +550,13 @@ class MasterMapper:
     def get_all_symbols(self) -> List[str]:
         return sorted(self.symbols)
 
-    def extract_tickers(self, articles):
+    def extract_tickers(self, articles: List[Dict[str, Any]]) -> List[str]:
         found = []
         pat_tagged = re.compile(r"\b(?:NSE|BSE)\s*[:\-]\s*([A-Z0-9&\-]{2,20})\b", re.IGNORECASE)
         pat_symbol = re.compile(r"\b([A-Z][A-Z0-9&\-]{2,20})\b")
 
         for art in articles:
-            text = f"{art.get('title','')} {art.get('body','')[:800]}".upper()
+            text = f"{art.get('title','')} {str(art.get('body',''))[:1200]}".upper()
 
             for m in pat_tagged.findall(text):
                 key = m.upper().strip()
@@ -543,6 +574,7 @@ class MasterMapper:
                     found.append(self.keywords[m])
 
         return list(dict.fromkeys(found))
+
 
 # =============================================================================
 # TrendHunter (unchanged)
@@ -566,6 +598,7 @@ class TrendHunter:
         for theme, score in scores.items():
             trends.append({'Theme': theme, 'Hype_Score': round((score / total_hits) * 100, 1), 'Mentions': score})
         return sorted(trends, key=lambda x: x['Hype_Score'], reverse=True)
+
 
 # =============================================================================
 # 5. UTILITIES
@@ -593,7 +626,7 @@ class APIKeys:
         if "EMAIL_PASS" not in self.keys:
             self.keys["EMAIL_PASS"] = input("   Gmail App Password: ").strip()
         if "EMAIL_TO" not in self.keys:
-            self.keys["EMAIL_TO"] = input("   Recipient Email: ").strip()
+            self.keys["EMAIL_TO"] = input("   Recipient Email(s) (comma separated ok): ").strip()
         print("="*50 + "\n")
 
 class DiskCache:
@@ -645,7 +678,7 @@ class DatabaseManager:
         for i in items:
             try:
                 c.execute("INSERT OR IGNORE INTO news_items VALUES (?,?,?,?,?,?,?)",
-                          (i['uid'], i['published'], i['source'], i['title'], i.get('body', '')[:5000], i['score'], str(i['tickers'])))
+                          (i['uid'], i['published'], i['source'], i['title'], i.get('body', '')[:5000], i['score'], str(i.get('tickers', []))))
             except Exception:
                 pass
         self.conn.commit()
@@ -659,6 +692,7 @@ class DatabaseManager:
                       (run_id, ts, r['Ticker'], r['Price'], r.get('Target_Price', 0), r.get('Horizon', ''),
                        r.get('Sharpe', 0), r['Score'], r['Verdict'], r['Trend'], r['RSI']))
         self.conn.commit()
+
 
 # =============================================================================
 # 6. NEWS ENGINE
@@ -718,7 +752,8 @@ class NewsEngine:
 
     async def collect_all(self):
         log.info(f"📡 Scanning {len(self.feeds)} feeds (India + Global)...")
-        async with aiohttp.ClientSession() as session:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        async with aiohttp.ClientSession(headers=headers) as session:
             tasks = [self.fetch_feed_async(session, url) for url in self.feeds]
             results = await asyncio.gather(*tasks)
 
@@ -784,11 +819,12 @@ class NewsEngine:
                 continue
             art['body'] = body_map[i]
             art['score'] = self.score_text(f"{art['title']} {art['body'][:300]}")
-            art['tickers'] = []
+            art['tickers'] = []  # will be filled per-article later using mapper
             unique.append(art)
             seen_links.add(art['link'])
 
         return unique
+
 
 # =============================================================================
 # 7. ANALYSIS & STRATEGY (WITH SESSION FIX + BATCH PREFETCH)
@@ -921,6 +957,7 @@ class DataEngine:
 
         return None, None, None, "None"
 
+
 class AnalysisLab:
     def calculate_technicals(self, prices: pd.Series) -> Dict[str, Any]:
         prices = prices.dropna()
@@ -979,7 +1016,6 @@ class AnalysisLab:
         def find_cf_value(cf_df: pd.DataFrame, labels: List[str]) -> Optional[float]:
             if cf_df is None or cf_df.empty:
                 return None
-            # Use the most recent column by position
             try:
                 col = cf_df.columns[0]
             except Exception:
@@ -1032,7 +1068,6 @@ class AnalysisLab:
                         intrinsic = (future_val + (term_val / ((1 + wacc) ** 5))) / shares
 
                         if intrinsic and intrinsic > 0:
-                            # clamp to reasonable band to prevent wild values
                             intrinsic = min(max(intrinsic, current_price * 0.2), current_price * 5.0)
                             return round(float(intrinsic), 2)
         except Exception:
@@ -1149,8 +1184,6 @@ class AnalysisLab:
             sector = infer_sector_from_name(company_name or "")
 
         # Company extraction priority (PATCH):
-        # 1) NSE CSV company_name (fast, offline)
-        # 2) yfinance info short/long name if available
         company = (company_name or "").strip()
         if not company and isinstance(info, dict):
             company = (info.get("longName") or info.get("shortName") or info.get("name") or "").strip()
@@ -1159,7 +1192,7 @@ class AnalysisLab:
 
         return {
             "Ticker": str(ticker).upper().replace(".NS", ""),
-            "Company": company,  # PATCH: separate Company column
+            "Company": company,
             "Price": round(current_price, 2),
             "Target_Price": target,
             "Horizon": horizon,
@@ -1173,25 +1206,372 @@ class AnalysisLab:
             "Sector": sector
         }
 
+
+# =============================================================================
+# 7.5 VERIFICATION ENGINE (TradingView + News + Fundamental) - FULL COVERAGE
+# =============================================================================
+def tv_num_to_verdict(x: float) -> str:
+    """
+    TradingView Recommend.All is typically in [-1, 1].
+    """
+    try:
+        v = float(x)
+    except Exception:
+        return "Neutral"
+    if v >= 0.5:
+        return "Strong Buy"
+    if v >= 0.1:
+        return "Buy"
+    if v <= -0.5:
+        return "Strong Sell"
+    if v <= -0.1:
+        return "Sell"
+    return "Neutral"
+
+def coarse(v: str) -> str:
+    s = (v or "").upper()
+    if "BUY" in s:
+        return "BUY"
+    if "SELL" in s:
+        return "SELL"
+    return "NEUTRAL"
+
+class Verifier:
+    def __init__(self):
+        self.session = make_retry_session(user_agent="Mozilla/5.0", total_retries=4)
+
+    def build_news_sentiment_map(self, articles: List[Dict[str, Any]]) -> Dict[str, str]:
+        """
+        Aggregate sentiment per ticker from (article.score) values.
+        """
+        agg: Dict[str, List[float]] = {}
+        for a in (articles or []):
+            score = a.get("score", 0.0)
+            tks = a.get("tickers", []) or []
+            for t in tks:
+                t0 = str(t).upper().replace(".NS", "").replace(".BO", "").strip()
+                if not t0:
+                    continue
+                agg.setdefault(t0, []).append(float(score))
+
+        out: Dict[str, str] = {}
+        for t, vals in agg.items():
+            if not vals:
+                continue
+            avg = float(np.mean(vals))
+            if avg >= 0.15:
+                out[t] = "Positive"
+            elif avg <= -0.15:
+                out[t] = "Negative"
+            else:
+                out[t] = "Neutral"
+        return out
+
+    def fundamental_verdict_from_row(self, row: Dict[str, Any]) -> str:
+        """
+        Simple but stable fundamental signal:
+        - If DCF_Val > Price by 10% => Positive
+        - If DCF_Val < Price by 10% => Negative
+        - else Neutral
+        """
+        try:
+            p = float(row.get("Price", 0))
+            d = float(row.get("DCF_Val", p))
+            if p <= 0:
+                return "Neutral"
+            ratio = d / p
+            if ratio >= 1.10:
+                return "Positive"
+            if ratio <= 0.90:
+                return "Negative"
+            return "Neutral"
+        except Exception:
+            return "Neutral"
+
+    def fetch_tradingview_recos(
+        self,
+        tickers_plain: List[str],
+        batch_size: int = 150,
+        pause_seconds: float = 0.9,
+        cache_ttl_hours: int = 24
+    ) -> Dict[str, str]:
+        """
+        FULL COVERAGE (best-effort):
+        - Batches requests to avoid throttling.
+        - Caches results to disk (cache/tv_recos_cache.json) for TTL hours.
+        - If TradingView blocks/throttles, missing tickers simply return Neutral later.
+        """
+        endpoints = [
+            "https://scanner.tradingview.com/india/scan",
+            "https://scanner.tradingview.com/global/scan",
+        ]
+
+        tickers_plain = [t.replace(".NS", "").replace(".BO", "").upper().strip() for t in (tickers_plain or []) if t]
+        tickers_plain = list(dict.fromkeys(tickers_plain))
+        if not tickers_plain:
+            return {}
+
+        cache_path = CACHE_DIR / "tv_recos_cache.json"
+
+        def load_cache() -> Tuple[Dict[str, Any], float]:
+            if not cache_path.exists():
+                return {}, 0.0
+            try:
+                data = json.loads(cache_path.read_text(encoding="utf-8"))
+                ts = float(data.get("_ts", 0.0))
+                return data, ts
+            except Exception:
+                return {}, 0.0
+
+        def save_cache(cache_obj: Dict[str, Any]):
+            try:
+                cache_obj["_ts"] = time.time()
+                cache_path.write_text(json.dumps(cache_obj, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
+
+        cache_obj, cache_ts = load_cache()
+        ttl_ok = (time.time() - cache_ts) <= (cache_ttl_hours * 3600)
+
+        cached_out: Dict[str, str] = {}
+        if ttl_ok:
+            for t in tickers_plain:
+                v = cache_obj.get(t)
+                if isinstance(v, str) and v:
+                    cached_out[t] = v
+
+        missing = [t for t in tickers_plain if t not in cached_out]
+
+        headers = {
+            "Content-Type": "application/json",
+            "Origin": "https://in.tradingview.com",
+            "Referer": "https://in.tradingview.com/",
+            "User-Agent": "Mozilla/5.0"
+        }
+
+        def post_scan(url: str, symbols: List[str]) -> Optional[Dict[str, str]]:
+            payload = {
+                "symbols": {"tickers": symbols, "query": {"types": []}},
+                "columns": ["Recommend.All"]
+            }
+            try:
+                r = self.session.post(url, data=json.dumps(payload), headers=headers, timeout=25)
+                if not r.ok:
+                    return None
+                data = r.json()
+                rows = data.get("data", []) or []
+                out = {}
+                for row in rows:
+                    s = row.get("s", "")
+                    d = row.get("d", [])
+                    if not s or not d:
+                        continue
+                    sym = s.split(":")[-1].upper().strip()
+                    try:
+                        val = float(d[0])
+                    except Exception:
+                        continue
+                    out[sym] = tv_num_to_verdict(val)
+                return out
+            except Exception:
+                return None
+
+        tv_out: Dict[str, str] = dict(cached_out)
+
+        if missing:
+            log.info(f"🔎 TradingView verification: {len(missing)} tickers missing from cache (batch_size={batch_size})")
+
+        for i in range(0, len(missing), batch_size):
+            batch = missing[i:i + batch_size]
+            tv_symbols = [f"NSE:{t}" for t in batch]
+
+            batch_result = None
+            for url in endpoints:
+                attempt = 0
+                while attempt < 3 and batch_result is None:
+                    attempt += 1
+                    batch_result = post_scan(url, tv_symbols)
+                    if batch_result is None:
+                        time.sleep(pause_seconds * attempt)
+                if batch_result:
+                    break
+
+            if batch_result:
+                for k, v in batch_result.items():
+                    tv_out[k] = v
+                    cache_obj[k] = v
+                save_cache(cache_obj)
+            else:
+                log.warning(f"⚠️ TradingView scan failed for batch {i}-{i+len(batch)} (will fallback to Neutral).")
+
+            time.sleep(pause_seconds)
+
+        return tv_out
+
+    def build_verification_table(
+        self,
+        df_src: pd.DataFrame,
+        tv_map: Dict[str, str],
+        news_map: Dict[str, str]
+    ) -> pd.DataFrame:
+        rows = []
+        for _, r in df_src.iterrows():
+            ticker = str(r.get("Ticker", "")).upper().replace(".NS", "").replace(".BO", "").strip()
+            if not ticker:
+                continue
+
+            our = str(r.get("Verdict", "HOLD"))
+            tv = tv_map.get(ticker, "Neutral")
+            news = news_map.get(ticker, "Neutral")
+            fundamental = self.fundamental_verdict_from_row(r.to_dict())
+
+            # Agreement score
+            ours_c = coarse(our)
+            tv_c = coarse(tv)
+            news_c = coarse(news)
+            fund_c = coarse(fundamental)
+
+            comps = [tv_c, news_c, fund_c]
+            matches = sum(1 for c in comps if c == ours_c)
+            agreement = int(round((matches / 3) * 100))
+
+            confidence = "Low"
+            if agreement >= 67:
+                confidence = "High"
+            elif agreement >= 34:
+                confidence = "Medium"
+
+            rows.append({
+                "Ticker": ticker,
+                "Company": r.get("Company", ""),
+                "Our Verdict": our,
+                "Agreement": agreement,
+                "Confidence": confidence,
+                "TV": tv,
+                "News": news,
+                "Fundamental": fundamental
+            })
+
+        return pd.DataFrame(rows)
+
+
 # =============================================================================
 # 8. REPORTING & EMAIL
 # =============================================================================
+def _split_recipients(raw: str) -> List[str]:
+    if not raw:
+        return []
+    parts = re.split(r"[,\s;]+", raw.strip())
+    out = []
+    for p in parts:
+        p = p.strip()
+        if p and "@" in p:
+            out.append(p)
+    return list(dict.fromkeys(out))
+
+def md_to_basic_html(md: str) -> str:
+    """
+    Minimal markdown-to-HTML for email readability (headings, bold, hr, bullets, numbered).
+    No external libs; safe and simple.
+    """
+    if not md:
+        return ""
+
+    lines = md.splitlines()
+    html_lines = []
+    in_ul = False
+    in_ol = False
+
+    def close_lists():
+        nonlocal in_ul, in_ol
+        if in_ul:
+            html_lines.append("</ul>")
+            in_ul = False
+        if in_ol:
+            html_lines.append("</ol>")
+            in_ol = False
+
+    for line in lines:
+        s = line.rstrip()
+
+        if s.strip() == "---":
+            close_lists()
+            html_lines.append("<hr/>")
+            continue
+
+        if s.startswith("### "):
+            close_lists()
+            html_lines.append(f"<h3>{s[4:]}</h3>")
+            continue
+        if s.startswith("## "):
+            close_lists()
+            html_lines.append(f"<h2>{s[3:]}</h2>")
+            continue
+        if s.startswith("# "):
+            close_lists()
+            html_lines.append(f"<h1>{s[2:]}</h1>")
+            continue
+
+        m_num = re.match(r"^\s*\d+\.\s+(.*)$", s)
+        if m_num:
+            if in_ul:
+                html_lines.append("</ul>")
+                in_ul = False
+            if not in_ol:
+                html_lines.append("<ol>")
+                in_ol = True
+            item = m_num.group(1)
+            item = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", item)
+            html_lines.append(f"<li>{item}</li>")
+            continue
+
+        m_bul = re.match(r"^\s*[\-\*]\s+(.*)$", s)
+        if m_bul:
+            if in_ol:
+                html_lines.append("</ol>")
+                in_ol = False
+            if not in_ul:
+                html_lines.append("<ul>")
+                in_ul = True
+            item = m_bul.group(1)
+            item = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", item)
+            html_lines.append(f"<li>{item}</li>")
+            continue
+
+        close_lists()
+
+        # bold
+        s2 = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", s)
+        if not s2.strip():
+            html_lines.append("<br/>")
+        else:
+            html_lines.append(f"<p>{s2}</p>")
+
+    close_lists()
+    return "\n".join(html_lines)
+
 class Emailer:
     def __init__(self, api_keys: APIKeys):
         self.user = api_keys.get("EMAIL_USER")
         self.password = api_keys.get("EMAIL_PASS")
-        self.recipient = api_keys.get("EMAIL_TO")
+        self.recipient_raw = api_keys.get("EMAIL_TO")
 
-    def send_report(self, files: List[Path], subject_line, body_text):
-        if not (self.user and self.password and self.recipient):
-            log.warning("📧 Email credentials missing. Skipping email.")
+    def send_report(self, files: List[Path], subject_line: str, body_text: str, html_body: Optional[str] = None):
+        recipients = _split_recipients(self.recipient_raw or "")
+        if not (self.user and self.password and recipients):
+            log.warning("📧 Email credentials missing (or no recipients). Skipping email.")
             return
 
-        msg = MIMEMultipart()
+        msg = MIMEMultipart("mixed")
         msg['From'] = self.user
-        msg['To'] = self.recipient
+        msg['To'] = ", ".join(recipients)
         msg['Subject'] = subject_line
-        msg.attach(MIMEText(body_text, 'plain'))
+
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(body_text or "", "plain", "utf-8"))
+        if html_body:
+            alt.attach(MIMEText(html_body, "html", "utf-8"))
+        msg.attach(alt)
 
         for f in files:
             if not f or not Path(f).exists():
@@ -1207,9 +1587,9 @@ class Emailer:
             server = smtplib.SMTP('smtp.gmail.com', 587)
             server.starttls()
             server.login(self.user, self.password)
-            server.sendmail(self.user, self.recipient, msg.as_string())
+            server.sendmail(self.user, recipients, msg.as_string())
             server.quit()
-            log.info(f"📧 Email Sent Successfully to {self.recipient}")
+            log.info(f"📧 Email Sent Successfully to {', '.join(recipients)}")
         except Exception as e:
             log.error(f"❌ Email Failed: {e}")
 
@@ -1217,18 +1597,22 @@ class ReportLab:
     def __init__(self, out_dir: Path):
         self.out_dir = out_dir
 
-    def generate_html_dashboard(self, results, articles, trends, ind_summary) -> Optional[Path]:
+    def generate_html_dashboard(self, results, articles, trends, ind_summary, disclaimer_text: str, verification_preview: Optional[pd.DataFrame] = None) -> Optional[Path]:
         template = """<!DOCTYPE html><html><head><title>Illuminati v29.0</title>
 <style>
-body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}
+body{font-family:Arial,Helvetica,sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}
 .card{background:#1e293b;border-radius:8px;padding:15px;margin-bottom:15px;border:1px solid #334155}
-.badge{padding:4px 8px;border-radius:4px;font-weight:bold}
+.badge{padding:4px 8px;border-radius:4px;font-weight:bold;display:inline-block}
 .buy{background:#065f46;color:#34d399}
 .sell{background:#7f1d1d;color:#f87171}
 .hold{background:#854d0e;color:#fef08a}
-table{width:100%;border-collapse:collapse;margin-top:20px}
-th,td{padding:12px;text-align:left;border-bottom:1px solid #334155}
+table{width:100%;border-collapse:collapse;margin-top:12px}
+th,td{padding:10px;text-align:left;border-bottom:1px solid #334155;vertical-align:top}
 th{color:#94a3b8}
+small{color:#94a3b8}
+a{color:#60a5fa}
+hr{border:0;border-top:1px solid #334155;margin:18px 0}
+pre{white-space:pre-wrap;word-wrap:break-word}
 </style></head><body>
 <h1>👁️ Illuminati Terminal v29.0</h1>
 <p>Assets Analyzed: {{ total }} | Date: {{ date }}</p>
@@ -1247,11 +1631,26 @@ th{color:#94a3b8}
 {% endfor %}
 </tbody></table>
 
-<h2>🚀 Investment Strategy</h2>
-<table><thead><tr><th>Ticker</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>
-{% for r in results %}
+<h2>✅ Verification Summary (Preview)</h2>
+<small>Full coverage for all tickers is included in the Excel sheet “Verification”.</small>
+<table><thead><tr><th>Ticker</th><th>Our</th><th>Agreement</th><th>TV</th><th>News</th><th>Fundamental</th></tr></thead><tbody>
+{% for v in verification_preview %}
 <tr>
-<td><b>{{ r.Ticker }}</b></td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td>
+<td><b>{{ v["Ticker"] }}</b></td>
+<td>{{ v["Our Verdict"] }}</td>
+<td>{{ v["Agreement"] }}% ({{ v["Confidence"] }})</td>
+<td>{{ v["TV"] }}</td>
+<td>{{ v["News"] }}</td>
+<td>{{ v["Fundamental"] }}</td>
+</tr>
+{% endfor %}
+</tbody></table>
+
+<h2>🚀 Investment Strategy (Top 150)</h2>
+<table><thead><tr><th>Ticker</th><th>Company</th><th>Price</th><th>Target</th><th>Horizon</th><th>Sharpe</th><th>Valuation</th><th>Score</th><th>Verdict</th></tr></thead><tbody>
+{% for r in results_top %}
+<tr>
+<td><b>{{ r.Ticker }}</b></td><td>{{ r.Company }}</td><td>{{ r.Price }}</td><td>{{ r.Target_Price }}</td><td>{{ r.Horizon }}</td>
 <td>{{ r.Sharpe }}</td><td>{{ r.DCF_Val }}</td><td>{{ r.Score }}</td>
 <td><span class="badge {{ 'buy' if 'BUY' in r.Verdict else ('sell' if 'SELL' in r.Verdict else 'hold') }}">{{ r.Verdict }}</span></td>
 </tr>
@@ -1259,19 +1658,34 @@ th{color:#94a3b8}
 </tbody></table>
 
 <h2>📰 Market Intel</h2>
-{% for a in articles[:8] %}
+{% for a in articles[:10] %}
 <div class="card">
-<h3><a href="{{ a.link }}" style="color:#60a5fa">{{ a.title }}</a></h3>
-<p style="color:#94a3b8">{{ a.published }} | {{ a.source }}</p>
-<p>{{ a.body[:250] }}...</p>
+<h3><a href="{{ a.link }}">{{ a.title }}</a></h3>
+<p><small>{{ a.published }} | {{ a.source }}</small></p>
+<p>{{ a.body[:260] }}...</p>
 </div>
 {% endfor %}
+
+<hr/>
+<h2>⚠️ Disclaimer</h2>
+<pre>{{ disclaimer_text }}</pre>
+
 </body></html>"""
 
         try:
             t = Template(template)
-            html = t.render(results=results, articles=articles, trends=trends, ind_summary=ind_summary,
-                            date=dt.datetime.now(), total=len(results))
+            results_top = results if isinstance(results, list) else []
+            verification_preview = verification_preview if verification_preview is not None else []
+            html = t.render(
+                results_top=results_top,
+                articles=articles or [],
+                trends=trends or [],
+                ind_summary=ind_summary or {},
+                date=dt.datetime.now(),
+                total=len(results) if results else 0,
+                disclaimer_text=disclaimer_text,
+                verification_preview=verification_preview
+            )
             path = self.out_dir / f"Dashboard_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
             path.write_text(html, encoding="utf-8")
             return path
@@ -1279,18 +1693,48 @@ th{color:#94a3b8}
             log.error(f"HTML Error: {e}")
             return None
 
-    def generate_full_deep_dive(self, results) -> Path:
+    def generate_full_deep_dive(self, results, disclaimer_text: str) -> Path:
         path = self.out_dir / f"Deep_Dive_Full_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         with open(path, 'w', encoding="utf-8") as f:
             f.write(f"ILLUMINATI DEEP DIVE REPORT | {dt.datetime.now()}\n")
-            f.write("="*60 + "\n\n")
+            f.write("="*80 + "\n\n")
             for r in results:
-                f.write(f"Ticker: {r['Ticker']} | Price: {r['Price']} | Verdict: {r['Verdict']}\n")
+                f.write(f"Ticker: {r['Ticker']} | Company: {r.get('Company','')} | Price: {r['Price']} | Verdict: {r['Verdict']}\n")
                 f.write(f"Target: {r['Target_Price']} ({r['Horizon']})\n")
-                f.write(f"Score Components: {r['Deep_Dive_Data']['Score_Breakdown']}\n")
+                f.write(f"Sector: {r.get('Sector','')}\n")
+                f.write(f"Trend: {r['Trend']} | RSI: {r['RSI']} | Sharpe: {r.get('Sharpe')}\n")
                 f.write(f"Valuation ({r['Deep_Dive_Data']['Valuation_Method']}): {r['DCF_Val']}\n")
-                f.write("-" * 30 + "\n\n")
+                f.write(f"Score Components: {r['Deep_Dive_Data']['Score_Breakdown']}\n")
+                f.write("-" * 60 + "\n\n")
+            f.write("\n" + "="*80 + "\n")
+            f.write("DISCLAIMER\n")
+            f.write("="*80 + "\n")
+            f.write(disclaimer_text + "\n")
         return path
+
+    def generate_disclaimer_txt(self, disclaimer_text: str) -> Path:
+        path = self.out_dir / f"Disclaimer_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        path.write_text(disclaimer_text, encoding="utf-8")
+        return path
+
+    def generate_exec_brief_txt(self, exec_brief_md: str) -> Path:
+        path = self.out_dir / f"Executive_Brief_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        # keep as text; email HTML will render separately
+        path.write_text(exec_brief_md.strip(), encoding="utf-8")
+        return path
+
+    def generate_zip_bundle(self, files: List[Path]) -> Path:
+        ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        zip_path = self.out_dir / f"Illuminati_Report_{ts}.zip"
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            for f in files:
+                try:
+                    if f and Path(f).exists():
+                        z.write(str(f), arcname=Path(f).name)
+                except Exception:
+                    continue
+        return zip_path
+
 
 class GeminiBrain:
     def __init__(self, api_key=None):
@@ -1338,17 +1782,122 @@ class GeminiBrain:
         except Exception as e:
             return f"LLM Completely Failed: {e}"
 
+
+def format_ai_insight_to_md(narrative: str) -> str:
+    """
+    Make the AI narrative readable: numbered points + bold labels where possible.
+    We preserve original content but wrap it for consistency.
+    """
+    if not narrative:
+        return "LLM Analysis Disabled."
+
+    # If model already produced headings/numbering, keep it; just ensure spacing.
+    txt = narrative.strip()
+
+    # Small enhancement: ensure "Key Observations" bullets become numbered if present
+    txt = re.sub(r"\n\*\s+", "\n- ", txt)
+
+    md = (
+        "## AI Insight\n\n"
+        f"{txt}\n"
+    ).strip()
+    return md
+
+def build_executive_brief_md(
+    df: pd.DataFrame,
+    trends: List[Dict[str, Any]],
+    ind_summary: Dict[str, Dict[str, Any]],
+    verification_df: Optional[pd.DataFrame],
+    tv_coverage_pct: float,
+    narrative_md: str
+) -> str:
+    top = df.head(5).copy()
+
+    lines = []
+    lines.append("# ILLUMINATI EXECUTIVE BRIEF")
+    lines.append("")
+    lines.append(f"**Run Time:** {dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"**Assets Analyzed:** {len(df)}")
+    lines.append("")
+
+    lines.append("## 1. Snapshot")
+    lines.append(f"1. **Top Verdict Mix:** "
+                 f"STRONG BUY={int((df['Verdict']=='STRONG BUY').sum())}, "
+                 f"BUY={int((df['Verdict']=='BUY').sum())}, "
+                 f"HOLD={int((df['Verdict']=='HOLD').sum())}, "
+                 f"SELL={int((df['Verdict']=='SELL').sum())}, "
+                 f"STRONG SELL={int((df['Verdict']=='STRONG SELL').sum())}")
+    lines.append(f"2. **TradingView Coverage (best-effort):** {tv_coverage_pct:.1f}% of tickers have cached/returned TV verdicts")
+    lines.append("")
+
+    lines.append("## 2. Top Opportunities")
+    for i, row in enumerate(top.itertuples(index=False), 1):
+        lines.append(
+            f"{i}. **{row.Ticker}** ({getattr(row,'Company','')}) — "
+            f"**{row.Verdict}**, Price={row.Price}, Target={row.Target_Price}, "
+            f"Horizon={row.Horizon}, Sharpe={row.Sharpe}"
+        )
+    lines.append("")
+
+    lines.append("## 3. Future Themes (News Hype)")
+    if trends:
+        for i, t in enumerate(trends[:5], 1):
+            lines.append(f"{i}. **{t['Theme']}** — Hype Score: **{t['Hype_Score']}%**, Mentions: {t['Mentions']}")
+    else:
+        lines.append("1. **Not enough theme signals** in the last 7 days of feeds.")
+
+    lines.append("")
+    lines.append("## 4. Industry Momentum (by Sector)")
+    if ind_summary:
+        # sort by avg score
+        items = sorted(ind_summary.items(), key=lambda kv: kv[1].get("avg_score", 0), reverse=True)
+        for i, (sec, d) in enumerate(items[:10], 1):
+            lines.append(f"{i}. **{sec}** — Avg Score: **{d['avg_score']}**, Verdict: **{d['verdict']}**")
+    else:
+        lines.append("1. **Not available** (sector mapping missing).")
+
+    lines.append("")
+    if verification_df is not None and not verification_df.empty:
+        lines.append("## 5. Verification Summary (Full Coverage)")
+        lines.append("1. **Agreement score** is computed across: TradingView + News + Fundamental vs our verdict.")
+        lines.append("2. Full table is available in Excel → **Verification** sheet.")
+        # quick stats
+        try:
+            avg_agree = float(verification_df["Agreement"].mean())
+        except Exception:
+            avg_agree = 0.0
+        lines.append(f"3. **Average Agreement:** **{avg_agree:.1f}%**")
+    else:
+        lines.append("## 5. Verification Summary")
+        lines.append("1. Verification table not generated.")
+
+    lines.append("")
+    # Attach AI Insight in brief as a short excerpt only
+    lines.append("## 6. AI Insight (Excerpt)")
+    snippet = narrative_md.replace("## AI Insight", "").strip()
+    snippet = "\n".join(snippet.splitlines()[:18]).strip()
+    lines.append(snippet + ("\n..." if len(snippet.splitlines()) >= 18 else ""))
+
+    lines.append("")
+    lines.append("---")
+    lines.append("## Disclaimer")
+    lines.append(DISCLAIMER_TEXT)
+
+    return "\n".join(lines).strip()
+
 def print_deep_dive_console(asset):
     if not asset:
         return
     print("\n" + "="*60)
     print(f"🔬 DEEP DIVE HIGHLIGHT: {asset['Ticker']}")
     print("="*60)
+    print(f"Company: {asset.get('Company','')}")
     print(f"Current Price: ₹{asset['Price']}  |  Target: ₹{asset['Target_Price']}")
     print(f"Verdict: {asset['Verdict']}  |  Horizon: {asset['Horizon']}")
     print(f"Valuation Method: {asset['Deep_Dive_Data']['Valuation_Method']}")
     print(f"Calculated Fair Value: {asset['DCF_Val']}")
     print(f"Score Factors: {asset['Deep_Dive_Data']['Score_Breakdown']}")
+
 
 # =============================================================================
 # 9. SCHEDULER & ORCHESTRATOR
@@ -1384,16 +1933,26 @@ def run_illuminati(interactive=False, tickers_arg=None):
     reporter = ReportLab(OUTPUT_DIR)
     emailer = Emailer(api)
     llm = GeminiBrain(api.get("GEMINI"))
+    verifier = Verifier()
 
     news.add_google_news_feed("Indian Stock Market News")
-    # Global broad feed (extra) – keep optional and non-breaking
     news.add_google_news_feed("Global Stock Market News")
 
     articles = news.process()
 
-    tickers_from_news = mapper.extract_tickers(articles)
-    for a in articles:
-        a['tickers'] = tickers_from_news
+    # PATCH: per-article ticker extraction (prevents "all neutral" news mapping)
+    log.info("🧠 Mapping tickers per article (for News sentiment verification)...")
+    with ThreadPoolExecutor(max_workers=50) as ex:
+        futures = []
+        for a in articles:
+            futures.append(ex.submit(mapper.extract_tickers, [a]))
+        for a, f in zip(articles, futures):
+            try:
+                a["tickers"] = f.result() or []
+            except Exception:
+                a["tickers"] = []
+
+    tickers_from_news = list(dict.fromkeys([t for a in articles for t in (a.get("tickers") or [])]))
     db.save_news(articles)
 
     trends = trend_hunter.predict_booming_industries(articles)
@@ -1461,16 +2020,118 @@ def run_illuminati(interactive=False, tickers_arg=None):
 
     db.save_analysis(results)
 
-    dashboard_path = reporter.generate_html_dashboard(results, articles, trends, ind_summary)
-    dd_path = reporter.generate_full_deep_dive(results)
+    # ---------------- AI INSIGHT ----------------
+    narrative_raw = llm.generate_narrative(df.head(10))
+    narrative_md = format_ai_insight_to_md(narrative_raw)
+
+    print(f"\n🤖 AI Insight (excerpt): {str(narrative_raw)[:280]}...\n")
+
+    # ---------------- VERIFICATION (FULL COVERAGE) ----------------
+    df_verify_src = df.copy()
+
+    tv_map = {}
+    try:
+        tv_map = verifier.fetch_tradingview_recos(df_verify_src["Ticker"].astype(str).tolist())
+    except Exception:
+        tv_map = {}
+
+    news_map = {}
+    try:
+        news_map = verifier.build_news_sentiment_map(articles)
+    except Exception:
+        news_map = {}
+
+    df_verify = verifier.build_verification_table(df_verify_src, tv_map, news_map)
+    verification_rows = df_verify.to_dict(orient="records") if df_verify is not None and not df_verify.empty else None
+
+    # TV coverage metric
+    try:
+        tv_cov = 100.0 * (df_verify["TV"].astype(str).str.lower().ne("neutral").sum() / max(len(df_verify), 1))
+    except Exception:
+        tv_cov = 0.0
+
+    # Executive brief
+    exec_brief_md = build_executive_brief_md(
+        df=df,
+        trends=trends,
+        ind_summary=ind_summary,
+        verification_df=df_verify,
+        tv_coverage_pct=tv_cov,
+        narrative_md=narrative_md
+    )
+
+    # ---------------- REPORT FILES ----------------
+    # Dashboard preview (avoid gigantic HTML) -> top 50 verification preview
+    ver_preview_df = df_verify.head(50).copy() if df_verify is not None and not df_verify.empty else pd.DataFrame()
+    dashboard_path = reporter.generate_html_dashboard(
+        results=results,
+        articles=articles,
+        trends=trends,
+        ind_summary=ind_summary,
+        disclaimer_text=DISCLAIMER_TEXT,
+        verification_preview=ver_preview_df.to_dict(orient="records") if not ver_preview_df.empty else []
+    )
+    dd_path = reporter.generate_full_deep_dive(results, DISCLAIMER_TEXT)
+    disc_txt_path = reporter.generate_disclaimer_txt(DISCLAIMER_TEXT)
+    exec_brief_txt_path = reporter.generate_exec_brief_txt(exec_brief_md)
 
     ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     excel_path = OUTPUT_DIR / f"Strategy_{ts}.xlsx"
-    df.to_excel(excel_path, index=False)
 
-    narrative = llm.generate_narrative(df.head(10))
-    print(f"\n🤖 AI Insight: {narrative[:300]}...\n")
+    # Excel (multi-sheet, readable, disclaimer + verification + momentum)
+    try:
+        with pd.ExcelWriter(excel_path, engine="xlsxwriter") as writer:
+            df.to_excel(writer, sheet_name="Strategy", index=False)
+            if df_verify is not None and not df_verify.empty:
+                df_verify.to_excel(writer, sheet_name="Verification", index=False)
 
+            # Momentum + trends sheets
+            if ind_summary:
+                mom = pd.DataFrame([{"Sector": k, "Avg Score": v["avg_score"], "Top Verdict": v["verdict"]} for k, v in ind_summary.items()])
+                mom.sort_values("Avg Score", ascending=False).to_excel(writer, sheet_name="Industry_Momentum", index=False)
+            if trends:
+                pd.DataFrame(trends).to_excel(writer, sheet_name="Booming_Themes", index=False)
+
+            # AI insight + exec brief + disclaimer
+            pd.DataFrame([{"AI Insight": narrative_raw}]).to_excel(writer, sheet_name="AI_Insight", index=False)
+            pd.DataFrame([{"Executive Brief": exec_brief_md}]).to_excel(writer, sheet_name="Executive_Brief", index=False)
+            pd.DataFrame([{"Disclaimer": DISCLAIMER_TEXT}]).to_excel(writer, sheet_name="Disclaimer", index=False)
+
+            # Light formatting: set column widths
+            wb = writer.book
+            for sheet in writer.sheets.values():
+                try:
+                    sheet.set_default_row(18)
+                except Exception:
+                    pass
+            ws = writer.sheets.get("Strategy")
+            if ws:
+                ws.set_column(0, 0, 12)  # Ticker
+                ws.set_column(1, 1, 34)  # Company
+                ws.set_column(2, 10, 14)
+
+            wv = writer.sheets.get("Verification")
+            if wv:
+                wv.set_column(0, 0, 12)
+                wv.set_column(1, 1, 34)
+                wv.set_column(2, 7, 16)
+
+            wd = writer.sheets.get("Disclaimer")
+            if wd:
+                wd.set_column(0, 0, 120)
+
+    except Exception as e:
+        log.error(f"Excel write failed: {e}")
+        # fallback (keeps run alive)
+        df.to_excel(excel_path, index=False)
+
+    # Zip bundle includes everything
+    bundle_files = [excel_path, dd_path, exec_brief_txt_path, disc_txt_path]
+    if dashboard_path:
+        bundle_files.append(dashboard_path)
+    zip_path = reporter.generate_zip_bundle(bundle_files)
+
+    # ---------------- CONSOLE OUTPUT ----------------
     print("\n" + "="*80)
     print("🚀 TOP OPPORTUNITIES (Buys)")
     print("="*80)
@@ -1491,28 +2152,45 @@ def run_illuminati(interactive=False, tickers_arg=None):
     else:
         print("   No strong sell signals found.")
 
+    # Print Industry Momentum
+    if ind_summary:
+        print("\n🚀 Industry Momentum")
+        mom_df = pd.DataFrame([{"Sector": k, "Avg Score": v["avg_score"], "Top Verdict": v["verdict"]} for k, v in ind_summary.items()]).sort_values("Avg Score", ascending=False)
+        print(tabulate(mom_df, headers='keys', tablefmt='psql', showindex=False))
+
+    # Print Verification preview
+    if df_verify is not None and not df_verify.empty:
+        print("\n✅ Verification Summary (Preview - full coverage in Excel)")
+        print(tabulate(df_verify.head(25), headers='keys', tablefmt='psql', showindex=False))
+
     if not df.empty:
         print_deep_dive_console(df.iloc[0].to_dict())
 
     print(f"\n✅ All Reports Saved to: {OUTPUT_DIR.resolve()}")
+    print(f"📦 Zip Bundle: {zip_path}")
 
+    # ---------------- EMAIL ----------------
     if api.get("EMAIL_USER"):
-        top = df.iloc[0]
-        email_body = (
-            f"ILLUMINATI EXECUTIVE BRIEF\n\n"
-            f"Top Pick: {top['Ticker']} ({top.get('Company','')})\n"
-            f"Verdict: {top['Verdict']}\n"
-            f"Target: {top['Target_Price']}\n\n"
-            f"AI Insight:\n{narrative}\n"
-        )
-        attachments = [excel_path, dd_path]
+        # Email readable body: Executive Brief + AI Insight + Disclaimer
+        email_body_md = (
+            f"{exec_brief_md}\n\n"
+            f"---\n\n"
+            f"{narrative_md}\n\n"
+            f"---\n\n"
+            f"## Disclaimer\n\n{DISCLAIMER_TEXT}\n"
+        ).strip()
+
+        email_html = md_to_basic_html(email_body_md)
+
+        attachments = [zip_path, excel_path, dd_path, exec_brief_txt_path, disc_txt_path]
         if dashboard_path:
             attachments.append(dashboard_path)
 
         emailer.send_report(
             attachments,
             f"Illuminati Report - {dt.datetime.now().strftime('%Y-%m-%d')}",
-            email_body
+            email_body_md,
+            html_body=email_html
         )
 
 def schedule_job():
